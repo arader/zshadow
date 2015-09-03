@@ -2,10 +2,10 @@
 A shell script for FreeBSD that automates replication of ZFS datasets
 
 The goals of *zfshadow* are as follows
-    *   zero dependencies on a FreeBSD system
-    *   automatically send ZFS snapshots to remote pools
-    *   recover from previously failed sends without intervention
-    *   preserve deleted datasets on remote copies
+  * zero dependencies on a FreeBSD system
+  * automatically send ZFS snapshots to remote pools
+  * recover from previously failed sends without intervention
+  * preserve deleted datasets on remote copies
 
 The last bullet is the primary reason for *zfshadow*'s existence. When
 researching zfs replication tools, it became apparent that most rely
