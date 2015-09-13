@@ -46,9 +46,6 @@ process_dataset()
         # calculate what the remote dataset's name is
         remote_dataset="$remote`echo $dataset | sed 's|^[^/]*||'`"
 
-        # make sure the dataset isn't mounted
-        ssh $host -p $port zfs umount $remote_dataset >/dev/null 2>&1
-
         # blindly try to create the base snapshot, then check the
         # return code to branch on either sending the initial data, or sending
         # an incremental stream.
@@ -72,7 +69,7 @@ process_dataset()
 
             log "    sending $dataset@$base_snap to $host"
 
-            send_output=`zfs send $dataset@$base_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duvF $remote" 2>&1`
+            send_output=`zfs send $dataset@$base_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1`
 
             if [ $? == 0 ]
             then
@@ -125,7 +122,7 @@ process_dataset()
 
             log "    sending $dataset@$delta_snap to $host"
 
-            send_output=`zfs send -i $base_snap $dataset@$delta_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duvF $remote" 2>&1`
+            send_output=`zfs send -i $base_snap $dataset@$delta_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1`
 
             if [ $? == 0 ]
             then
@@ -140,9 +137,6 @@ process_dataset()
                 zfs destroy $dataset@$delta_snap
             fi
         fi
-
-        # finally, re-mount the dataset
-        ssh $host -p $port zfs mount $remote_dataset >/dev/null 2>&1
 
         log "  finished processing $dataset at `date`"
     done
