@@ -6,6 +6,8 @@
 
 PATH=/bin:/usr/bin:/sbin
 
+version="0.1"
+
 host=""
 port="22"
 self="`basename $0`"
@@ -186,13 +188,18 @@ usage()
     echo " remote_dataset1: the place to replicate local_dataset1 to"
 }
 
+version()
+{
+    echo "zfshadow version $version"
+}
+
 if [ ! `whoami` = "root" ]
 then
     echo "$self must be run as root"
     exit 1
 fi
 
-while getopts ":p:h" opt
+while getopts ":p:hv" opt
 do
     case $opt in
         p)
@@ -206,6 +213,10 @@ do
             ;;
         h)
             usage
+            exit 0
+            ;;
+        v)
+            version
             exit 0
             ;;
         \?)
