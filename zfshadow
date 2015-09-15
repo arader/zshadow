@@ -18,8 +18,8 @@ ec=0
 
 process_dataset()
 {
-    local=`echo "$1" | sed 's/:.*//'`
-    remote=`echo "$1" | sed 's/.*://'`
+    local local=`echo "$1" | sed 's/:.*//'`
+    local remote=`echo "$1" | sed 's/.*://'`
 
     zfs list -H "$local" >/dev/null 2>&1
 
@@ -30,14 +30,14 @@ process_dataset()
     fi
 
     # get a list of all the datasets under the specified dataset
-    datasets=`zfs list -H -r -o name $local`
+    local datasets=`zfs list -H -r -o name $local`
 
     # iterate through each dataset and send a backup
     for dataset in $datasets
     do
         log "  started processing $dataset at `date`"
 
-        ignore=`zfs get -H -o value zfshadow:ignore $dataset`
+        local ignore=`zfs get -H -o value zfshadow:ignore $dataset`
 
         if [ "$ignore" == "yes" ]
         then
@@ -46,7 +46,7 @@ process_dataset()
         fi
 
         # calculate what the remote dataset's name is
-        remote_dataset="$remote`echo $dataset | sed 's|^[^/]*||'`"
+        local remote_dataset="$remote`echo $dataset | sed 's|^[^/]*||'`"
 
         # blindly try to create the base snapshot, then check the
         # return code to branch on either sending the initial data, or sending
@@ -71,7 +71,7 @@ process_dataset()
 
             log "    sending $dataset@$base_snap to $host"
 
-            send_output=`zfs send $dataset@$base_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1`
+            local send_output=`zfs send $dataset@$base_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1`
 
             if [ $? == 0 ]
             then
@@ -109,7 +109,7 @@ process_dataset()
                 fi
             done
 
-            snapshot_output=`zfs snapshot $dataset@$delta_snap 2>&1`
+            local snapshot_output=`zfs snapshot $dataset@$delta_snap 2>&1`
 
             if [ $? != 0 ]
             then
@@ -124,7 +124,7 @@ process_dataset()
 
             log "    sending $dataset@$delta_snap to $host"
 
-            send_output=`zfs send -i $base_snap $dataset@$delta_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1`
+            local send_output=`zfs send -i $base_snap $dataset@$delta_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1`
 
             if [ $? == 0 ]
             then
@@ -151,7 +151,7 @@ update_snapshots()
     ssh $host -p $port zfs destroy $2@$base_snap >/dev/null 2>&1
 
     log "      renaming remote snapshot $2@$delta_snap to $2@$base_snap"
-    rename_output=`ssh $host -p $port zfs rename $2@$delta_snap $2@$base_snap 2>&1`
+    local rename_output=`ssh $host -p $port zfs rename $2@$delta_snap $2@$base_snap 2>&1`
 
     if [ $? == 0 ]
     then
