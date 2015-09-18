@@ -12,7 +12,7 @@ base_snap="shadow.base"
 delta_snap="shadow.delta"
 ec=0
 
-unset zfshadow_tags
+unset zfshadow_tags zfshadow_tag zfshadow_tag_cfg
 
 send_dataset()
 {
@@ -169,13 +169,15 @@ send_tag()
     local tag="$1"
     local dataset
 
-    parse_tag_cfg "$tag"
+    load_tag "$tag"
+
+    [ $? == 0 ] || exerr "invalid tag configuration for '$tag'"
 
     local datasets=$(get_datasets_for_tag "$tag")
 
     for dataset in $datasets
     do
-        echo "sending $dataset"
+        echo "sending $dataset using scheme $zfshadow_tag_scheme"
     done
 }
 
@@ -184,6 +186,17 @@ load_tags()
     if [ -z "$zfshadow_tags" ]
     then
         zfshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zfshadow:[a-zA-Z0-9_]*\.cfg$' | sed -e 's/^zfshadow:\([a-zA-Z0-9_]*\)\.cfg$/\1/' | sort | uniq | tr '\n' ' ')
+    fi
+}
+
+load_tag()
+{
+    if [ "$zfshadow_tag" != "$1" ]
+    then
+        zfshadow_tag="$1"
+        zfshadow_tag_cfg=$(zfs get -H -s local -o value zfshadow:$1.cfg | head -n 1)
+
+        parse_tag_cfg "$zfshadow_tag_cfg"
     fi
 }
 
@@ -233,7 +246,7 @@ parse_tag_cfg()
 
             [ "$gzip" == "yes" ] && zfshadow_ssh_gzip="yes"
             ;;
-        ?)
+        *)
             return 1
     esac
 
@@ -380,19 +393,19 @@ create|update)
 tag)
     shift
 
-    [ $# == 2 ] || exerr "usage: zfshadow tag <tagname> <dataset>"
+    [ $# == 2 ] || exerr "usage: zfshadow tag <dataset> <tag>"
 
-    check_tag "$1"
+    check_tag "$2"
 
-    [ $? == 0 ] || exerr "tag '$1' not found"
+    [ $? == 0 ] || exerr "tag '$2' not found"
 
-    zfs list -H -o name "$2" > /dev/null 2>&1
+    zfs list -H -o name "$1" > /dev/null 2>&1
 
-    [ $? == 0 ] || exerr "dataset '$2' not found"
+    [ $? == 0 ] || exerr "dataset '$1' not found"
 
-    zfs set "zfshadow:$1=send" "$2" > /dev/null 2>&1
+    zfs set "zfshadow:$2=send" "$1" > /dev/null 2>&1
 
-    [ $? == 0 ] || exerr "failed to tag dataset '$2' with '$1'"
+    [ $? == 0 ] || exerr "failed to tag dataset '$1' with '$2'"
 
     ;;
 
