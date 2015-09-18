@@ -142,24 +142,55 @@ send_dataset()
     done
 }
 
+update_snapshots()
+{
+    # process remote snapshots
+    log "      destroying remote snapshot $2@$base_snap"
+    ssh $host -p $port zfs destroy $2@$base_snap >/dev/null 2>&1
+
+    log "      renaming remote snapshot $2@$delta_snap to $2@$base_snap"
+    local rename_output=$(ssh $host -p $port zfs rename $2@$delta_snap $2@$base_snap 2>&1)
+
+    if [ $? == 0 ]
+    then
+        # process local snapshots
+        log "      destroying local snapshot $1@$base_snap"
+        zfs destroy $1@$base_snap >/dev/null 2>&1
+
+        log "      renaming local snapshot $1@$delta_snap to $1@$base_snap"
+        zfs rename $1@$delta_snap $1@$base_snap >/dev/null 2>&1
+    else
+        err "      failed to rename the remote snapshot $2@$delta_snap to $2@$base_snap - output: $rename_output"
+    fi
+}
+
 send_tag()
 {
     local tag="$1"
+    local dataset
 
-    echo "sending [$tag]"
+    parse_tag_cfg "$tag"
+
+    local datasets=$(get_datasets_for_tag "$tag")
+
+    for dataset in $datasets
+    do
+        echo "sending $dataset"
+    done
 }
 
 load_tags()
 {
     if [ -z "$zfshadow_tags" ]
     then
-        zfshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zfshadow:[a-zA-Z0-9_]*\.cfg$' | sed -e 's/^zfshadow:\([a-zA-Z0-9_]*\)\.cfg$/\1/' | sort | uniq)
+        zfshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zfshadow:[a-zA-Z0-9_]*\.cfg$' | sed -e 's/^zfshadow:\([a-zA-Z0-9_]*\)\.cfg$/\1/' | sort | uniq | tr '\n' ' ')
     fi
 }
 
 check_tag()
 {
     local check_tag="$1"
+    local tag
 
     load_tags
 
@@ -172,6 +203,41 @@ check_tag()
     done
 
     return 1
+}
+
+get_cfg_option()
+{
+    echo "$1" | grep -o "|$2=[^|]*|" | sed -e "s/|$2=\([^|]*\)|/\1/"
+}
+
+parse_tag_cfg()
+{
+    unset zfshadow_tag_scheme zfshadow_tag_target zfshadow_ssh_args zfshadow_ssh_gzip
+
+    zfshadow_tag_scheme=$(echo "$1" | sed -e 's/\([^|]*\)|.*/\1/')
+    zfshadow_tag_target=$(echo "$1" | sed -e "s/$zfshadow_tag_scheme|\([^|]*\)|.*/\1/")
+
+    case $zfshadow_tag_scheme in
+        local)
+            ;;
+        ssh)
+            local host=$(get_cfg_option "$1" host)
+            local port=$(get_cfg_option "$1" port)
+            local gzip=$(get_cfg_option "$1" gzip)
+
+            [ ! -z "$host" ] || return 1
+
+            zfshadow_ssh_args="$host"
+
+            [ -z "$port" ] || zfshadow_ssh_args=$(echo "$zfshadow_ssh_args -p $port")
+
+            [ "$gzip" == "yes" ] && zfshadow_ssh_gzip="yes"
+            ;;
+        ?)
+            return 1
+    esac
+
+    return 0
 }
 
 get_datasets_for_tag()
@@ -195,7 +261,7 @@ parse_tags()
         do
             check_tag "$1" || exerr "tag $1 does not exist"
 
-            if [ -z $tags ]
+            if [ -z "$tags" ]
             then
                 tags="$1"
             else
@@ -207,28 +273,6 @@ parse_tags()
     fi
 
     echo $tags
-}
-
-update_snapshots()
-{
-    # process remote snapshots
-    log "      destroying remote snapshot $2@$base_snap"
-    ssh $host -p $port zfs destroy $2@$base_snap >/dev/null 2>&1
-
-    log "      renaming remote snapshot $2@$delta_snap to $2@$base_snap"
-    local rename_output=$(ssh $host -p $port zfs rename $2@$delta_snap $2@$base_snap 2>&1)
-
-    if [ $? == 0 ]
-    then
-        # process local snapshots
-        log "      destroying local snapshot $1@$base_snap"
-        zfs destroy $1@$base_snap >/dev/null 2>&1
-
-        log "      renaming local snapshot $1@$delta_snap to $1@$base_snap"
-        zfs rename $1@$delta_snap $1@$base_snap >/dev/null 2>&1
-    else
-        err "      failed to rename the remote snapshot $2@$delta_snap to $2@$base_snap - output: $rename_output"
-    fi
 }
 
 log()
@@ -270,8 +314,10 @@ version()
 case "$1" in
 #
 # create - create a tag and its properties
+# update - change a tag and its properties
 #
-create)
+create|update)
+    action="$1"
     shift
 
     if [ $# -lt 3 ]
@@ -284,21 +330,47 @@ create)
         exerr "tag names can only contain a-z, 0-9, and _ characters"
 
     tag="$1"
+    options=""
 
-    shift; while getopts :t:h: arg; do case ${arg} in 
+    if [ "$action" == "create" ]
+    then
+        check_tag "$tag"
+
+        [ $? != 0 ] || exerr "tag '$tag' already exists, did you mean 'update'?"
+    fi
+
+    shift; while getopts :s:t:o: arg; do case ${arg} in 
+      s) tag_scheme=${OPTARG};;
       t) tag_target=${OPTARG};; 
-      h) tag_host=${OPTARG};;
+      o)
+          echo ${OPTARG} | grep -Eq '^[a-zA-Z]+=[^|]+$'
+          [ $? == 0 ] || exerr "a tag option must be of the form name=value, where value does not contain the '|' character"
+
+          options=$(echo "$options${OPTARG}|")
+          ;;
       ?) usage;; 
     esac; done; shift $(( ${OPTIND} - 1 ))
 
-    [ ! -z $tag_target ] || \
-        exerr "the target name is required (-t <target>)"
+    [ ! -z "$tag_scheme" ] || \
+        exerr "the scheme is requried (-s <scheme>)"
+
+    [ ! -z "$tag_target" ] || \
+        exerr "the target dataset is required (-t <target>)"
+
+    tag_cfg="$tag_scheme|$tag_target|$options"
+
+    parse_tag_cfg "$tag_cfg"
+
+    [ $? == 0 ] || exerr "invalid options list for $tag_scheme"
 
     # when creating a new tag, add the tag properties to every pool
     # so it's a global property regardless of what pools are connected
     all_pools=$(zpool list -H -o name)
 
-    zfs set zfshadow:$tag.cfg=$tag_host $all_pools
+    echo "creating $tag"
+    zfs set zfshadow:$tag.cfg=$tag_cfg $all_pools > /dev/null 2>&1
+
+    [ $? == 0 ] || exerr "failed to create tag $tag"
 
     ;;
 
@@ -306,6 +378,22 @@ create)
 # tag - tag a dataset for sending
 #
 tag)
+    shift
+
+    [ $# == 2 ] || exerr "usage: zfshadow tag <tagname> <dataset>"
+
+    check_tag "$1"
+
+    [ $? == 0 ] || exerr "tag '$1' not found"
+
+    zfs list -H -o name "$2" > /dev/null 2>&1
+
+    [ $? == 0 ] || exerr "dataset '$2' not found"
+
+    zfs set "zfshadow:$1=send" "$2" > /dev/null 2>&1
+
+    [ $? == 0 ] || exerr "failed to tag dataset '$2' with '$1'"
+
     ;;
 
 #
@@ -346,7 +434,7 @@ send)
     do
         send_tag $tag
     done
-    
+
     log "finished processing datasets at $(date)"
     ;;
 
