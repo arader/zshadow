@@ -236,11 +236,14 @@ parse_tag_cfg()
         ssh)
             local host=$(get_cfg_option "$1" host)
             local port=$(get_cfg_option "$1" port)
+            local user=$(get_cfg_option "$1" user)
             local gzip=$(get_cfg_option "$1" gzip)
 
             [ ! -z "$host" ] || return 1
 
             zfshadow_ssh_args="$host"
+
+            [ -z "$user" ] || zfshadow_ssh_args=$(echo "$user@$zfshadow_ssh_args")
 
             [ -z "$port" ] || zfshadow_ssh_args=$(echo "$zfshadow_ssh_args -p $port")
 
