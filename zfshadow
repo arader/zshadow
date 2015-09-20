@@ -274,9 +274,10 @@ send_tag()
 
 load_tags()
 {
+    echo "$1" | grep -q '^[a-zA-Z0-9][a-zA-Z0-9_\-]*$' || \
     if [ -z "$zfshadow_tags" ]
     then
-        zfshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zfshadow:[a-zA-Z0-9_]*\.cfg$' | sed -e 's/^zfshadow:\([a-zA-Z0-9_]*\)\.cfg$/\1/' | sort | uniq | tr '\n' ' ')
+        zfshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zfshadow:[a-zA-Z0-9][a-zA-Z0-9_\-]*\.cfg$' | sed -e 's/^zfshadow:\([a-zA-Z0-9][a-zA-Z0-9_\-]*\)\.cfg$/\1/' | sort | uniq | tr '\n' ' ')
     fi
 }
 
@@ -438,8 +439,8 @@ create|update)
         exit 1
     fi
 
-    echo "$1" | grep -qv "[^a-zA-Z0-9_]" || \
-        exerr "tag names can only contain a-z, 0-9, and _ characters"
+    echo "$1" | grep -q '^[a-zA-Z0-9][a-zA-Z0-9_\-]*$' || \
+        exerr "tag names can only contain a-z, 0-9, -, _ and must not start with - or _"
 
     tag="$1"
     options=""
@@ -523,6 +524,8 @@ list)
     for tag in $list_tags
     do
         datasets=$(get_datasets_for_tag $tag)
+
+        [ ! -z "$datasets" ] || printf "%s\t\t-\n" $tag
 
         for dataset in $datasets
         do
