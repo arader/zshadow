@@ -8,160 +8,239 @@ PATH=/bin:/usr/bin:/sbin
 
 version="0.1"
 
-base_snap="shadow.base"
-delta_snap="shadow.delta"
 ec=0
 
-unset zfshadow_tags zfshadow_tag zfshadow_tag_cfg
+unset zfshadow_tags zfshadow_tag zfshadow_tag_cfg zfshadow_tag_scheme zfshadow_tag_target
 
 send_dataset()
 {
-    local local=$(echo "$1" | sed 's/:.*//')
-    local remote=$(echo "$1" | sed 's/.*://')
+    local dataset="$1"
 
-    zfs list -H "$local" >/dev/null 2>&1
+    log "  started processing $dataset at $(date)"
 
-    if [ $? != 0 ]
+    # calculate what the remote target's name is
+    local target_path="$zfshadow_tag_target$(echo $dataset | sed 's|^[^/]*||')"
+
+    # blindly try to create the base snapshot, then check the
+    # return code to branch on either sending the initial data, or sending
+    # an incremental stream.
+    zfs snapshot $dataset@shadow.$zfshadow_tag >/dev/null 2>&1
+
+    if [ $? == 0 ]
     then
-        err "could not find dataset $local"
-        return
-    fi
+        # the base snapshot was just created, destroy any remote data
+        # and start fresh
+        log "    initial snapshot $dataset@shadow.$zfshadow_tag created, clearing remote host's copy (if any)"
 
-    # get a list of all the datasets under the specified dataset
-    local datasets=$(zfs list -H -r -o name $local)
+        destroy_target "$target_path"
+        zfs destroy $dataset@shadow.$zfshadow_tag.delta > /dev/null 2>&1 
 
-    # iterate through each dataset and send a backup
-    for dataset in $datasets
-    do
-        log "  started processing $dataset at $(date)"
-
-        local ignore=$(zfs get -H -o value zfshadow:ignore $dataset)
-
-        if [ "$ignore" == "yes" ]
+        # if the local dataset is the root dataset of the pool, then the
+        # above will have destroyed the target, so re-create it.
+        if [ "$target_path" == "$zfshadow_tag_target" ]
         then
-            log "  skipping $dataset (zfshadow:ignore property set)"
-            continue
+            create_target "$target_path"
         fi
 
-        # calculate what the remote dataset's name is
-        local remote_dataset="$remote$(echo $dataset | sed 's|^[^/]*||')"
+        log "    sending $dataset@shadow.$zfshadow_tag to $zfshadow_tag_target"
 
-        # blindly try to create the base snapshot, then check the
-        # return code to branch on either sending the initial data, or sending
-        # an incremental stream.
-        zfs snapshot $dataset@$base_snap >/dev/null 2>&1
+        local send_output
+        send_output=$(send_base_to_target "$dataset")
 
         if [ $? == 0 ]
         then
-            # the base snapshot was just created, destroy any remote data
-            # and start fresh
-            log "    initial snapshot $dataset@$base_snap created, clearing remote host's copy (if any)"
-
-            ssh $host -p $port zfs destroy -r "$remote_dataset" > /dev/null 2>&1
-            zfs destroy $dataset@$delta_snap > /dev/null 2>&1 
-
-            # if the local dataset is the root dataset of the pool, then the
-            # above will have destroyed the target, so re-create it.
-            if [ "$remote_dataset" == "$remote" ]
-            then
-                ssh $host -p $port zfs create "$remote_dataset" > /dev/null 2>&1
-            fi
-
-            log "    sending $dataset@$base_snap to $host"
-
-            local send_output=$(zfs send $dataset@$base_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1)
-
-            if [ $? == 0 ]
-            then
-                log "    successfully sent snapshot '$dataset@$base_snap'"
-            else
-                err "    failed to send snapshot '$dataset@$base_snap', destroying newly created base snapshot - output: $send_output"
-
-                # destroy the newly created base snapshot so that the next time
-                # this script is run, the base snapshot will be re-created and
-                # re-sent
-                zfs destroy $dataset@$base_snap > /dev/null 2>&1
-            fi
+            log "    successfully sent snapshot '$dataset@shadow.$zfshadow_tag'"
         else
-            # first check to see if there already is an existing delta snapshot. If
-            # there is, then this means we were unable to clean up the remote host's snapshots
-            # and should do so now. Otherwise, create the delta snapshot and send.
+            err "    failed to send snapshot '$dataset@shadow.$zfshadow_tag', destroying newly created base snapshot - output: $send_output"
 
-            # try up to 6 times to clean up any existing delta snapshots
-            for attempt in 1 2 3 4 5 6
-            do
-                zfs list -H -o name $dataset@$delta_snap >/dev/null 2>&1
+            # destroy the newly created base snapshot so that the next time
+            # this script is run, the base snapshot will be re-created and
+            # re-sent
+            zfs destroy $dataset@shadow.$zfshadow_tag > /dev/null 2>&1
+        fi
+    else
+        # first check to see if there already is an existing delta snapshot. If
+        # there is, then this means we were unable to clean up the remote host's snapshots
+        # and should do so now. Otherwise, create the delta snapshot and send.
 
-                if [ $? != 0 ]
-                then
-                    # there aren't any delta snapshots on this machine, so break out of the loop
-                    break
-                else
-                    log "    delta snapshot $dataset@$delta_snap still exists, updating remote snapshots (attempt #$attempt)"
-
-                    update_snapshots $dataset $remote_dataset
-
-                    # on the off chance that we failed to update the snapshots again,
-                    # sleep 10 seconds so that each attempt is made 10 seconds apart
-                    sleep 10
-                fi
-            done
-
-            local snapshot_output=$(zfs snapshot $dataset@$delta_snap 2>&1)
+        # try up to 6 times to clean up any existing delta snapshots
+        for attempt in 1 2 3 4 5 6
+        do
+            zfs list -H -o name $dataset@shadow.$zfshadow_tag.delta >/dev/null 2>&1
 
             if [ $? != 0 ]
             then
-                # despite trying to clean up any left over snapshots, we still
-                # failed to create a snapshot. go ahead and abort for now, with the
-                # hope that a later invocation of this script will have success
-                err "  failed to create the delta snapshot '$dataset@$delta_snap' - output: $snapshot_output"
-
-                # move on to the next dataset
-                continue
-            fi
-
-            log "    sending $dataset@$delta_snap to $host"
-
-            local send_output=$(zfs send -i $base_snap $dataset@$delta_snap | gzip | ssh $host -p $port "gzcat | zfs recv -duv $remote" 2>&1)
-
-            if [ $? == 0 ]
-            then
-                log "    successfully sent $dataset@$delta_snap, updating base snapshot"
-
-                update_snapshots $dataset $remote_dataset
+                # there aren't any delta snapshots on this machine, so break out of the loop
+                break
             else
-                err "    failed to send $dataset@$delta_snap, destroying newly created delta snapshot - output: $send_output"
+                log "    delta snapshot $dataset@shadow.$zfshadow_tag.delta still exists, updating remote snapshots (attempt #$attempt)"
 
-                # since we couldn't send it, just destroy it. If this
-                # script gets invoked again the delta snapshot will just be recreated.
-                zfs destroy $dataset@$delta_snap
+                update_snapshots $dataset $target_path
+
+                # on the off chance that we failed to update the snapshots again,
+                # sleep 10 seconds so that each attempt is made 10 seconds apart
+                sleep 10
             fi
+        done
+
+        local snapshot_output=$(zfs snapshot $dataset@shadow.$zfshadow_tag.delta 2>&1)
+
+        if [ $? != 0 ]
+        then
+            # despite trying to clean up any left over snapshots, we still
+            # failed to create a snapshot. go ahead and abort for now, with the
+            # hope that a later invocation of this script will have success
+            err "  failed to create the delta snapshot '$dataset@shadow.$zfshadow_tag.delta' - output: $snapshot_output"
+
+            # move on to the next dataset
+            continue
         fi
 
-        log "  finished processing $dataset at $(date)"
-    done
+        log "    sending $dataset@shadow.$zfshadow_tag.delta to $zfshadow_tag_target"
+
+        local send_output
+        send_output=$(send_delta_to_target $dataset)
+
+        if [ $? == 0 ]
+        then
+            log "    successfully sent $dataset@shadow.$zfshadow_tag.delta, updating base snapshot"
+
+            update_snapshots $dataset $target_path
+        else
+            err "    failed to send $dataset@shadow.$zfshadow_tag.delta, destroying newly created delta snapshot - output: $send_output"
+
+            # since we couldn't send it, just destroy it. If this
+            # script gets invoked again the delta snapshot will just be recreated.
+            zfs destroy $dataset@shadow.$zfshadow_tag.delta
+        fi
+    fi
+
+    log "  finished processing $dataset at $(date)"
 }
 
 update_snapshots()
 {
     # process remote snapshots
-    log "      destroying remote snapshot $2@$base_snap"
-    ssh $host -p $port zfs destroy $2@$base_snap >/dev/null 2>&1
+    log "      destroying remote snapshot"
+    destroy_target_base $2
 
-    log "      renaming remote snapshot $2@$delta_snap to $2@$base_snap"
-    local rename_output=$(ssh $host -p $port zfs rename $2@$delta_snap $2@$base_snap 2>&1)
+    log "      renaming remote snapshot"
+    local rename_output
+    rename_output=$(rename_target_delta $2)
 
     if [ $? == 0 ]
     then
         # process local snapshots
-        log "      destroying local snapshot $1@$base_snap"
-        zfs destroy $1@$base_snap >/dev/null 2>&1
+        log "      destroying local snapshot"
+        zfs destroy $1@shadow.$zfshadow_tag >/dev/null 2>&1
 
-        log "      renaming local snapshot $1@$delta_snap to $1@$base_snap"
-        zfs rename $1@$delta_snap $1@$base_snap >/dev/null 2>&1
+        log "      renaming local snapshot"
+        zfs rename $1@shadow.$zfshadow_tag.delta $1@shadow.$zfshadow_tag >/dev/null 2>&1
     else
-        err "      failed to rename the remote snapshot $2@$delta_snap to $2@$base_snap - output: $rename_output"
+        err "      failed to rename the remote snapshot - output: $rename_output"
     fi
+}
+
+destroy_target()
+{
+    case "$zfshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+            ssh $zfshadow_ssh_args zfs destroy -r "$1" > /dev/null 2>&1
+            ;;
+        *)
+            ;;
+    esac
+}
+
+create_target()
+{
+    case "$zfshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+            ssh $zfshadow_ssh_args zfs create "$1" > /dev/null 2>&1
+            ;;
+        *)
+            ;;
+    esac
+}
+
+send_base_to_target()
+{
+    local output ret
+
+    case "$zfshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+            output=$(zfs send $1@shadow.$zfshadow_tag | ssh $zfshadow_ssh_args "zfs recv -duv $zfshadow_tag_target" 2>&1)
+            ret=$?
+            ;;
+        *)
+            ;;
+    esac
+
+    echo $output
+
+    return $ret
+}
+
+send_delta_to_target()
+{
+    local output ret
+
+    case "$zfshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+            output=$(zfs send -i shadow.$zfshadow_tag $1@shadow.$zfshadow_tag.delta | ssh $zfshadow_ssh_args "zfs recv -duv $zfshadow_tag_target" 2>&1)
+            ret=$?
+            ;;
+        *)
+            ;;
+    esac
+
+    echo $output
+
+    return $ret
+}
+
+destroy_target_base()
+{
+    case "$zfshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+        ssh $zfshadow_ssh_args zfs destroy $1@shadow.$zfshadow_tag >/dev/null 2>&1
+        local ret=$?
+            ;;
+        *)
+            ;;
+    esac
+
+    return $ret
+}
+
+rename_target_delta()
+{
+    local output ret
+
+    case "$zfshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+            output=$(ssh $zfshadow_ssh_args zfs rename $1@shadow.$zfshadow_tag.delta $1@shadow.$zfshadow_tag 2>&1)
+            ret=$?
+            ;;
+        *)
+            ;;
+    esac
+
+    echo $output
+
+    return $ret
 }
 
 send_tag()
@@ -178,6 +257,7 @@ send_tag()
     for dataset in $datasets
     do
         echo "sending $dataset using scheme $zfshadow_tag_scheme"
+        send_dataset "$dataset"
     done
 }
 
@@ -225,10 +305,15 @@ get_cfg_option()
 
 parse_tag_cfg()
 {
-    unset zfshadow_tag_scheme zfshadow_tag_target zfshadow_ssh_args zfshadow_ssh_gzip
+    unset zfshadow_ssh_args zfshadow_ssh_gzip
 
     zfshadow_tag_scheme=$(echo "$1" | sed -e 's/\([^|]*\)|.*/\1/')
+
+    [ ! -z "$zfshadow_tag_scheme" ] || return 1
+
     zfshadow_tag_target=$(echo "$1" | sed -e "s/$zfshadow_tag_scheme|\([^|]*\)|.*/\1/")
+
+    [ ! -z "$zfshadow_tag_target" ] || return 1
 
     case $zfshadow_tag_scheme in
         local)
