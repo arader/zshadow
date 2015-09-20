@@ -252,6 +252,17 @@ send_tag()
 
     [ $? == 0 ] || exerr "invalid tag configuration for '$tag'"
 
+    local pid=$(pgrep -F "/var/run/zfshadow."$tag".pid" 2>/dev/null)
+
+    if [ ! -z $pid ]
+    then
+        log "zfshadow is already sending '$tag' as pid $pid, skipping"
+
+        return 0
+    fi
+
+    echo $$ > "/var/run/zfshadow."$tag".pid"
+
     local datasets=$(get_datasets_for_tag "$tag")
 
     for dataset in $datasets
