@@ -275,7 +275,7 @@ send_tag()
 
     for dataset in $datasets
     do
-        echo "sending $dataset using scheme $zshadow_tag_scheme"
+        echo "sending $dataset using tag $zshadow_tag and scheme $zshadow_tag_scheme"
         send_dataset "$dataset"
     done
 
@@ -571,19 +571,47 @@ delete)
 tag)
     shift
 
-    [ $# == 2 ] || exerr "usage: zshadow tag <dataset> <tag>"
+    [ $# -gt 1 ] || exerr "usage: zshadow tag <dataset> <tag>"
 
-    check_tag "$2"
+    dataset="$1"
+    tag="$2"
 
-    [ $? == 0 ] || exerr "tag '$2' not found"
+    check_tag "$tag"
 
-    zfs list -H -o name "$1" > /dev/null 2>&1
+    [ $? == 0 ] || exerr "tag '$tag' not found"
 
-    [ $? == 0 ] || exerr "dataset '$1' not found"
+    zfs list -H -o name "$dataset" > /dev/null 2>&1
 
-    zfs set "zshadow:$2=send" "$1" > /dev/null 2>&1
+    [ $? == 0 ] || exerr "dataset '$dataset' not found"
 
-    [ $? == 0 ] || exerr "failed to tag dataset '$1' with '$2'"
+    shift; shift;
+
+    tag_mode='send'
+
+    while getopts :m: arg; do case ${arg} in 
+      m)
+          case "${OPTARG}" in
+              send)
+                  tag_mode='send'
+                  ;;
+              ignore)
+                  tag_mode='ignore'
+                  ;;
+              *)
+                  usage
+                  exit 1;
+          esac
+            ;;
+      *)
+          usage
+          exit 1;
+          ;;
+    esac; done; shift $(( ${OPTIND} - 1 ))
+
+
+    zfs set "zshadow:$tag=$tag_mode" "$dataset" > /dev/null 2>&1
+
+    [ $? == 0 ] || exerr "failed to tag dataset '$dataset' with '$tag'"
 
     ;;
 
