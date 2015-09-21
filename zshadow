@@ -10,7 +10,7 @@ version="0.1"
 
 ec=0
 
-unset zfshadow_tags zfshadow_tag zfshadow_tag_cfg zfshadow_tag_scheme zfshadow_tag_target
+unset zshadow_tags zshadow_tag zshadow_tag_cfg zshadow_tag_scheme zshadow_tag_target
 
 send_dataset()
 {
@@ -19,44 +19,44 @@ send_dataset()
     log "  started processing $dataset at $(date)"
 
     # calculate what the remote target's name is
-    local target_path="$zfshadow_tag_target$(echo $dataset | sed 's|^[^/]*||')"
+    local target_path="$zshadow_tag_target$(echo $dataset | sed 's|^[^/]*||')"
 
     # blindly try to create the base snapshot, then check the
     # return code to branch on either sending the initial data, or sending
     # an incremental stream.
-    zfs snapshot $dataset@shadow.$zfshadow_tag >/dev/null 2>&1
+    zfs snapshot $dataset@shadow.$zshadow_tag >/dev/null 2>&1
 
     if [ $? == 0 ]
     then
         # the base snapshot was just created, destroy any remote data
         # and start fresh
-        log "    initial snapshot $dataset@shadow.$zfshadow_tag created, clearing remote host's copy (if any)"
+        log "    initial snapshot $dataset@shadow.$zshadow_tag created, clearing remote host's copy (if any)"
 
         destroy_target "$target_path"
-        zfs destroy $dataset@shadow.$zfshadow_tag.delta > /dev/null 2>&1 
+        zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
 
         # if the local dataset is the root dataset of the pool, then the
         # above will have destroyed the target, so re-create it.
-        if [ "$target_path" == "$zfshadow_tag_target" ]
+        if [ "$target_path" == "$zshadow_tag_target" ]
         then
             create_target "$target_path"
         fi
 
-        log "    sending $dataset@shadow.$zfshadow_tag to $zfshadow_tag_target"
+        log "    sending $dataset@shadow.$zshadow_tag to $zshadow_tag_target"
 
         local send_output
         send_output=$(send_base_to_target "$dataset")
 
         if [ $? == 0 ]
         then
-            log "    successfully sent snapshot '$dataset@shadow.$zfshadow_tag'"
+            log "    successfully sent snapshot '$dataset@shadow.$zshadow_tag'"
         else
-            err "    failed to send snapshot '$dataset@shadow.$zfshadow_tag', destroying newly created base snapshot - output: $send_output"
+            err "    failed to send snapshot '$dataset@shadow.$zshadow_tag', destroying newly created base snapshot - output: $send_output"
 
             # destroy the newly created base snapshot so that the next time
             # this script is run, the base snapshot will be re-created and
             # re-sent
-            zfs destroy $dataset@shadow.$zfshadow_tag > /dev/null 2>&1
+            zfs destroy $dataset@shadow.$zshadow_tag > /dev/null 2>&1
         fi
     else
         # first check to see if there already is an existing delta snapshot. If
@@ -66,14 +66,14 @@ send_dataset()
         # try up to 6 times to clean up any existing delta snapshots
         for attempt in 1 2 3 4 5 6
         do
-            zfs list -H -o name $dataset@shadow.$zfshadow_tag.delta >/dev/null 2>&1
+            zfs list -H -o name $dataset@shadow.$zshadow_tag.delta >/dev/null 2>&1
 
             if [ $? != 0 ]
             then
                 # there aren't any delta snapshots on this machine, so break out of the loop
                 break
             else
-                log "    delta snapshot $dataset@shadow.$zfshadow_tag.delta still exists, updating remote snapshots (attempt #$attempt)"
+                log "    delta snapshot $dataset@shadow.$zshadow_tag.delta still exists, updating remote snapshots (attempt #$attempt)"
 
                 update_snapshots $dataset $target_path
 
@@ -83,35 +83,35 @@ send_dataset()
             fi
         done
 
-        local snapshot_output=$(zfs snapshot $dataset@shadow.$zfshadow_tag.delta 2>&1)
+        local snapshot_output=$(zfs snapshot $dataset@shadow.$zshadow_tag.delta 2>&1)
 
         if [ $? != 0 ]
         then
             # despite trying to clean up any left over snapshots, we still
             # failed to create a snapshot. go ahead and abort for now, with the
             # hope that a later invocation of this script will have success
-            err "  failed to create the delta snapshot '$dataset@shadow.$zfshadow_tag.delta' - output: $snapshot_output"
+            err "  failed to create the delta snapshot '$dataset@shadow.$zshadow_tag.delta' - output: $snapshot_output"
 
             # move on to the next dataset
             continue
         fi
 
-        log "    sending $dataset@shadow.$zfshadow_tag.delta to $zfshadow_tag_target"
+        log "    sending $dataset@shadow.$zshadow_tag.delta to $zshadow_tag_target"
 
         local send_output
         send_output=$(send_delta_to_target $dataset)
 
         if [ $? == 0 ]
         then
-            log "    successfully sent $dataset@shadow.$zfshadow_tag.delta, updating base snapshot"
+            log "    successfully sent $dataset@shadow.$zshadow_tag.delta, updating base snapshot"
 
             update_snapshots $dataset $target_path
         else
-            err "    failed to send $dataset@shadow.$zfshadow_tag.delta, destroying newly created delta snapshot - output: $send_output"
+            err "    failed to send $dataset@shadow.$zshadow_tag.delta, destroying newly created delta snapshot - output: $send_output"
 
             # since we couldn't send it, just destroy it. If this
             # script gets invoked again the delta snapshot will just be recreated.
-            zfs destroy $dataset@shadow.$zfshadow_tag.delta
+            zfs destroy $dataset@shadow.$zshadow_tag.delta
         fi
     fi
 
@@ -132,10 +132,10 @@ update_snapshots()
     then
         # process local snapshots
         log "      destroying local snapshot"
-        zfs destroy $1@shadow.$zfshadow_tag >/dev/null 2>&1
+        zfs destroy $1@shadow.$zshadow_tag >/dev/null 2>&1
 
         log "      renaming local snapshot"
-        zfs rename $1@shadow.$zfshadow_tag.delta $1@shadow.$zfshadow_tag >/dev/null 2>&1
+        zfs rename $1@shadow.$zshadow_tag.delta $1@shadow.$zshadow_tag >/dev/null 2>&1
     else
         err "      failed to rename the remote snapshot - output: $rename_output"
     fi
@@ -143,11 +143,11 @@ update_snapshots()
 
 destroy_target()
 {
-    case "$zfshadow_tag_scheme" in
+    case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            ssh $zfshadow_ssh_args zfs destroy -r "$1" > /dev/null 2>&1
+            ssh $zshadow_ssh_args zfs destroy -r "$1" > /dev/null 2>&1
             ;;
         *)
             ;;
@@ -156,11 +156,11 @@ destroy_target()
 
 create_target()
 {
-    case "$zfshadow_tag_scheme" in
+    case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            ssh $zfshadow_ssh_args zfs create "$1" > /dev/null 2>&1
+            ssh $zshadow_ssh_args zfs create "$1" > /dev/null 2>&1
             ;;
         *)
             ;;
@@ -171,11 +171,11 @@ send_base_to_target()
 {
     local output ret
 
-    case "$zfshadow_tag_scheme" in
+    case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(zfs send $1@shadow.$zfshadow_tag | ssh $zfshadow_ssh_args "zfs recv -duv $zfshadow_tag_target" 2>&1)
+            output=$(zfs send $1@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target" 2>&1)
             ret=$?
             ;;
         *)
@@ -191,11 +191,11 @@ send_delta_to_target()
 {
     local output ret
 
-    case "$zfshadow_tag_scheme" in
+    case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(zfs send -i shadow.$zfshadow_tag $1@shadow.$zfshadow_tag.delta | ssh $zfshadow_ssh_args "zfs recv -duv $zfshadow_tag_target" 2>&1)
+            output=$(zfs send -i shadow.$zshadow_tag $1@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target" 2>&1)
             ret=$?
             ;;
         *)
@@ -209,11 +209,11 @@ send_delta_to_target()
 
 destroy_target_base()
 {
-    case "$zfshadow_tag_scheme" in
+    case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-        ssh $zfshadow_ssh_args zfs destroy $1@shadow.$zfshadow_tag >/dev/null 2>&1
+        ssh $zshadow_ssh_args zfs destroy $1@shadow.$zshadow_tag >/dev/null 2>&1
         local ret=$?
             ;;
         *)
@@ -227,11 +227,11 @@ rename_target_delta()
 {
     local output ret
 
-    case "$zfshadow_tag_scheme" in
+    case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(ssh $zfshadow_ssh_args zfs rename $1@shadow.$zfshadow_tag.delta $1@shadow.$zfshadow_tag 2>&1)
+            output=$(ssh $zshadow_ssh_args zfs rename $1@shadow.$zshadow_tag.delta $1@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
         *)
@@ -256,7 +256,7 @@ send_tag()
 
     if [ $? != 0 ]
     then
-        log "zfshadow is already sending '$tag', skipping"
+        log "zshadow is already sending '$tag', skipping"
 
         return 0
     fi
@@ -265,7 +265,7 @@ send_tag()
 
     for dataset in $datasets
     do
-        echo "sending $dataset using scheme $zfshadow_tag_scheme"
+        echo "sending $dataset using scheme $zshadow_tag_scheme"
         send_dataset "$dataset"
     done
 
@@ -275,20 +275,20 @@ send_tag()
 load_tags()
 {
     echo "$1" | grep -q '^[a-zA-Z0-9][a-zA-Z0-9_\-]*$' || \
-    if [ -z "$zfshadow_tags" ]
+    if [ -z "$zshadow_tags" ]
     then
-        zfshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zfshadow:[a-zA-Z0-9][a-zA-Z0-9_\-]*\.cfg$' | sed -e 's/^zfshadow:\([a-zA-Z0-9][a-zA-Z0-9_\-]*\)\.cfg$/\1/' | sort | uniq | tr '\n' ' ')
+        zshadow_tags=$(zfs get -H -s local -t filesystem -o property all | grep '^zshadow:[a-zA-Z0-9][a-zA-Z0-9_\-]*\.cfg$' | sed -e 's/^zshadow:\([a-zA-Z0-9][a-zA-Z0-9_\-]*\)\.cfg$/\1/' | sort | uniq | tr '\n' ' ')
     fi
 }
 
 load_tag()
 {
-    if [ "$zfshadow_tag" != "$1" ]
+    if [ "$zshadow_tag" != "$1" ]
     then
-        zfshadow_tag="$1"
-        zfshadow_tag_cfg=$(zfs get -H -s local -o value zfshadow:$1.cfg | head -n 1)
+        zshadow_tag="$1"
+        zshadow_tag_cfg=$(zfs get -H -s local -o value zshadow:$1.cfg | head -n 1)
 
-        parse_tag_cfg "$zfshadow_tag_cfg"
+        parse_tag_cfg "$zshadow_tag_cfg"
     fi
 }
 
@@ -299,7 +299,7 @@ check_tag()
 
     load_tags
 
-    for tag in $zfshadow_tags
+    for tag in $zshadow_tags
     do
         if [ $check_tag == $tag ]
         then
@@ -317,17 +317,17 @@ get_cfg_option()
 
 parse_tag_cfg()
 {
-    unset zfshadow_ssh_args zfshadow_ssh_gzip
+    unset zshadow_ssh_args zshadow_ssh_gzip
 
-    zfshadow_tag_scheme=$(echo "$1" | sed -e 's/\([^|]*\)|.*/\1/')
+    zshadow_tag_scheme=$(echo "$1" | sed -e 's/\([^|]*\)|.*/\1/')
 
-    [ ! -z "$zfshadow_tag_scheme" ] || return 1
+    [ ! -z "$zshadow_tag_scheme" ] || return 1
 
-    zfshadow_tag_target=$(echo "$1" | sed -e "s/$zfshadow_tag_scheme|\([^|]*\)|.*/\1/")
+    zshadow_tag_target=$(echo "$1" | sed -e "s/$zshadow_tag_scheme|\([^|]*\)|.*/\1/")
 
-    [ ! -z "$zfshadow_tag_target" ] || return 1
+    [ ! -z "$zshadow_tag_target" ] || return 1
 
-    case $zfshadow_tag_scheme in
+    case $zshadow_tag_scheme in
         local)
             ;;
         ssh)
@@ -338,13 +338,13 @@ parse_tag_cfg()
 
             [ ! -z "$host" ] || return 1
 
-            zfshadow_ssh_args="$host"
+            zshadow_ssh_args="$host"
 
-            [ -z "$user" ] || zfshadow_ssh_args=$(echo "$user@$zfshadow_ssh_args")
+            [ -z "$user" ] || zshadow_ssh_args=$(echo "$user@$zshadow_ssh_args")
 
-            [ -z "$port" ] || zfshadow_ssh_args=$(echo "$zfshadow_ssh_args -p $port")
+            [ -z "$port" ] || zshadow_ssh_args=$(echo "$zshadow_ssh_args -p $port")
 
-            [ "$gzip" == "yes" ] && zfshadow_ssh_gzip="yes"
+            [ "$gzip" == "yes" ] && zshadow_ssh_gzip="yes"
             ;;
         *)
             return 1
@@ -357,7 +357,7 @@ get_datasets_for_tag()
 {
     local tag="$1"
 
-    zfs get -H -t filesystem -o name,value zfshadow:$tag | grep '[[:space:]]send' | awk '{ print $1 }'
+    zfs get -H -t filesystem -o name,value zshadow:$tag | grep '[[:space:]]send' | awk '{ print $1 }'
 }
 
 parse_tags()
@@ -368,7 +368,7 @@ parse_tags()
 
     if [ $# == 0 ]
     then
-        tags=$zfshadow_tags
+        tags=$zshadow_tags
     else
         while [ $# -gt 0 ]
         do
@@ -390,28 +390,28 @@ parse_tags()
 
 lock()
 {
-    local pid=$(pgrep -F "/var/run/zfshadow."$tag".pid" 2>/dev/null)
+    local pid=$(pgrep -F "/var/run/zshadow."$tag".pid" 2>/dev/null)
 
     if [ ! -z $pid ]
     then
         return 1
     fi
 
-    echo $$ > "/var/run/zfshadow."$tag".pid"
+    echo $$ > "/var/run/zshadow."$tag".pid"
 
     return 0
 }
 
 unlock()
 {
-    rm "/var/run/zfshadow."$tag".pid" >/dev/null 2>&1
+    rm "/var/run/zshadow."$tag".pid" >/dev/null 2>&1
     return 0
 }
 
 log()
 {
     echo "$1"
-    logger -t zfshadow "$1"
+    logger -t zshadow "$1"
 }
 
 err()
@@ -428,7 +428,7 @@ exerr()
 
 usage()
 {
-    echo "usage: zfshadow [-p port] [-h] dest_host local_dataset1:remote_dataset1 [local_dataset2:remote_dataset2] ..."
+    echo "usage: zshadow [-p port] [-h] dest_host local_dataset1:remote_dataset1 [local_dataset2:remote_dataset2] ..."
     echo " -p port: the ssh port to connect to on the remote host"
     echo " -h: print this help"
     echo " -v: print the version info"
@@ -439,7 +439,7 @@ usage()
 
 version()
 {
-    echo "zfshadow version $version"
+    echo "zshadow version $version"
 }
 
 ########## END FUNCTION DECLARATIONS ##########
@@ -507,7 +507,7 @@ create|update)
     all_pools=$(zpool list -H -o name)
 
     echo "creating $tag"
-    zfs set zfshadow:$tag.cfg=$tag_cfg $all_pools > /dev/null 2>&1
+    zfs set zshadow:$tag.cfg=$tag_cfg $all_pools > /dev/null 2>&1
 
     [ $? == 0 ] || exerr "failed to create tag $tag"
 
@@ -533,15 +533,15 @@ delete)
 
     all_pools=$(zpool list -H -o name)
 
-    zfs inherit zfshadow:$tag.cfg $all_pools > /dev/null 2>&1
+    zfs inherit zshadow:$tag.cfg $all_pools > /dev/null 2>&1
 
     [ $? == 0 ] || exerr "failed to remove tag configuration for $tag"
 
-    all_sets=$(zfs get -H -s local -o name zfshadow:$tag)
+    all_sets=$(zfs get -H -s local -o name zshadow:$tag)
 
     if [ ! -z "$all_sets" ]
     then
-        zfs inherit zfshadow:$tag $all_sets > /dev/null 2>&1
+        zfs inherit zshadow:$tag $all_sets > /dev/null 2>&1
 
         [ $? == 0 ] || exerr "failed to remove tag $tag"
     fi
@@ -561,7 +561,7 @@ delete)
 tag)
     shift
 
-    [ $# == 2 ] || exerr "usage: zfshadow tag <dataset> <tag>"
+    [ $# == 2 ] || exerr "usage: zshadow tag <dataset> <tag>"
 
     check_tag "$2"
 
@@ -571,7 +571,7 @@ tag)
 
     [ $? == 0 ] || exerr "dataset '$1' not found"
 
-    zfs set "zfshadow:$2=send" "$1" > /dev/null 2>&1
+    zfs set "zshadow:$2=send" "$1" > /dev/null 2>&1
 
     [ $? == 0 ] || exerr "failed to tag dataset '$1' with '$2'"
 
