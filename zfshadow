@@ -587,17 +587,36 @@ list)
 
     [ $? == 0 ] || exit 1
 
-    printf "TAG\t\tDATASET\n"
+    max_tag_len=0
+    max_ds_len=0
+
+    for tag in $list_tags
+    do
+        tag_len=$(echo "$tag" | wc -c | tr -s ' ')
+
+        [ $tag_len -lt $max_tag_len ] || max_tag_len=$tag_len
+
+        datasets=$(get_datasets_for_tag $tag)
+
+        for dataset in $datasets
+        do
+            ds_len=$(echo "$dataset" | wc -c | tr -s ' ')
+
+            [ $ds_len -lt $max_ds_len ] || max_ds_len=$ds_len
+        done
+    done
+
+    printf "%-${max_tag_len}s  %-${max_ds_len}s\n" 'TAG' 'DATASET'
 
     for tag in $list_tags
     do
         datasets=$(get_datasets_for_tag $tag)
 
-        [ ! -z "$datasets" ] || printf "%s\t\t-\n" $tag
+        [ ! -z "$datasets" ] || printf "%-${max_tag_len}s  -\n" $tag
 
         for dataset in $datasets
         do
-            printf "%s\t\t%s\n" $tag $dataset
+            printf "%-${max_tag_len}s  %-${max_ds_len}s\n" $tag $dataset
         done
     done
     ;;
