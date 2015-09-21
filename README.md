@@ -1,7 +1,7 @@
-# zfshadow
+# zshadow
 A shell script for FreeBSD that automates replication of ZFS datasets
 
-The goals of **zfshadow** are as follows
+The goals of **zshadow** are as follows
 
   * zero dependencies on a FreeBSD system
   * automatically send ZFS snapshots to remote pools
@@ -18,6 +18,6 @@ also set the following properties:
 
   * **mountpoint**: this is set to '**none**' so that the dataset can't
     be mounted. If the dataset were mounted, it's likely that the contents
-    would be modified, invalidating **zfshadow**'s incremental backups
+    would be modified, invalidating **zshadow**'s incremental backups
   * **atime**: this is set to '**off**' to further protect the remote
     datasets from modification
