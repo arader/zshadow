@@ -405,6 +405,7 @@ lock()
 unlock()
 {
     rm "/var/run/zfshadow."$tag".pid" >/dev/null 2>&1
+    return 0
 }
 
 log()
@@ -469,6 +470,12 @@ create|update)
         check_tag "$tag"
 
         [ $? != 0 ] || exerr "tag '$tag' already exists, did you mean 'update'?"
+    else
+        check_tag "$tag"
+
+        [ $? == 0 ] || exerr "tag '$tag' does not exist, use 'create' to create it"
+
+        lock "$tag" || exerr "tag '$tag' currently locked for sending"
     fi
 
     shift; while getopts :s:t:o: arg; do case ${arg} in 
