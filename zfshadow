@@ -252,16 +252,14 @@ send_tag()
 
     [ $? == 0 ] || exerr "invalid tag configuration for '$tag'"
 
-    local pid=$(pgrep -F "/var/run/zfshadow."$tag".pid" 2>/dev/null)
+    lock "$tag" 
 
-    if [ ! -z $pid ]
+    if [ $? != 0 ]
     then
-        log "zfshadow is already sending '$tag' as pid $pid, skipping"
+        log "zfshadow is already sending '$tag', skipping"
 
         return 0
     fi
-
-    echo $$ > "/var/run/zfshadow."$tag".pid"
 
     local datasets=$(get_datasets_for_tag "$tag")
 
@@ -270,6 +268,8 @@ send_tag()
         echo "sending $dataset using scheme $zfshadow_tag_scheme"
         send_dataset "$dataset"
     done
+
+    unlock "$tag"
 }
 
 load_tags()
@@ -388,6 +388,25 @@ parse_tags()
     echo $tags
 }
 
+lock()
+{
+    local pid=$(pgrep -F "/var/run/zfshadow."$tag".pid" 2>/dev/null)
+
+    if [ ! -z $pid ]
+    then
+        return 1
+    fi
+
+    echo $$ > "/var/run/zfshadow."$tag".pid"
+
+    return 0
+}
+
+unlock()
+{
+    rm "/var/run/zfshadow."$tag".pid" >/dev/null 2>&1
+}
+
 log()
 {
     echo "$1"
@@ -484,6 +503,48 @@ create|update)
     zfs set zfshadow:$tag.cfg=$tag_cfg $all_pools > /dev/null 2>&1
 
     [ $? == 0 ] || exerr "failed to create tag $tag"
+
+    ;;
+
+#
+# delete - delete a tag
+#
+delete)
+    shift
+
+    if [ $# != 1 ]
+    then
+        usage
+        exit 1
+    fi
+
+    tag="$1"
+
+    check_tag "$tag" || exerr "tag '$tag' does not exist"
+
+    lock "$tag" || exerr "tag '$tag' currently locked for sending"
+
+    all_pools=$(zpool list -H -o name)
+
+    zfs inherit zfshadow:$tag.cfg $all_pools > /dev/null 2>&1
+
+    [ $? == 0 ] || exerr "failed to remove tag configuration for $tag"
+
+    all_sets=$(zfs get -H -s local -o name zfshadow:$tag)
+
+    if [ ! -z "$all_sets" ]
+    then
+        zfs inherit zfshadow:$tag $all_sets > /dev/null 2>&1
+
+        [ $? == 0 ] || exerr "failed to remove tag $tag"
+    fi
+
+    all_snaps=$(zfs list -H -t snapshot -o name | grep "@shadow.$tag$")
+
+    for snap in $all_snaps
+    do
+        zfs destroy $snap > /dev/null 2>&1
+    done
 
     ;;
 
