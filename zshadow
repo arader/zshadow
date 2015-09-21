@@ -122,22 +122,28 @@ update_snapshots()
 {
     # process remote snapshots
     log "      destroying remote snapshot"
-    destroy_target_base $2
+    local destroy_output
+    destroy_output=$(destroy_target_base $2)
 
-    log "      renaming remote snapshot"
-    local rename_output
-    rename_output=$(rename_target_delta $2)
-
-    if [ $? == 0 ]
+    if [ $? != 0 ]
     then
-        # process local snapshots
-        log "      destroying local snapshot"
-        zfs destroy $1@shadow.$zshadow_tag >/dev/null 2>&1
-
-        log "      renaming local snapshot"
-        zfs rename $1@shadow.$zshadow_tag.delta $1@shadow.$zshadow_tag >/dev/null 2>&1
+        err "      failed to destroy the remote snapshot - output: $destroy_output"
     else
-        err "      failed to rename the remote snapshot - output: $rename_output"
+        log "      renaming remote snapshot"
+        local rename_output
+        rename_output=$(rename_target_delta $2)
+
+        if [ $? == 0 ]
+        then
+            # process local snapshots
+            log "      destroying local snapshot"
+            zfs destroy $1@shadow.$zshadow_tag >/dev/null 2>&1
+
+            log "      renaming local snapshot"
+            zfs rename $1@shadow.$zshadow_tag.delta $1@shadow.$zshadow_tag >/dev/null 2>&1
+        else
+            err "      failed to rename the remote snapshot - output: $rename_output"
+        fi
     fi
 }
 
@@ -209,16 +215,20 @@ send_delta_to_target()
 
 destroy_target_base()
 {
+    local output ret
+
     case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-        ssh $zshadow_ssh_args zfs destroy $1@shadow.$zshadow_tag >/dev/null 2>&1
-        local ret=$?
+            output=$(ssh $zshadow_ssh_args zfs destroy $1@shadow.$zshadow_tag 2>&1)
+            ret=$?
             ;;
         *)
             ;;
     esac
+
+    echo $output
 
     return $ret
 }
