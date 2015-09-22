@@ -30,9 +30,9 @@ send_dataset()
     then
         # the base snapshot was just created, destroy any remote data
         # and start fresh
-        log "    initial snapshot $dataset@shadow.$zshadow_tag created, clearing remote host's copy (if any)"
+        log "    initial snapshot $dataset@shadow.$zshadow_tag created"
 
-        destroy_target "$target_path"
+        destroy_target_snapshots "$target_path" > /dev/null 2>&1
         zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
 
         # if the local dataset is the root dataset of the pool, then the
@@ -45,7 +45,7 @@ send_dataset()
         log "    sending $dataset@shadow.$zshadow_tag to $zshadow_tag_target"
 
         local send_output
-        send_output=$(send_base_to_target "$dataset")
+        send_output=$(send_base_to_target -F "$dataset")
 
         if [ $? == 0 ]
         then
@@ -147,17 +147,23 @@ update_snapshots()
     fi
 }
 
-destroy_target()
+destroy_target_snapshots()
 {
+    local snapshots output
+
     case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            ssh $zshadow_ssh_args zfs destroy -r "$1" > /dev/null 2>&1
+            snapshots=$(ssh $zshadow_ssh_args zfs list -H -o name -d 1 -t snapshot "$1")
+
+            [ -z "$snapshots" ] || output=$(ssh $zshadow_ssh_args "zfs destroy $snapshots")
             ;;
         *)
             ;;
     esac
+
+    echo $output
 }
 
 create_target()
@@ -175,13 +181,22 @@ create_target()
 
 send_base_to_target()
 {
-    local output ret
+    local output ret dataset flags
+
+    flags="-duv"
+    dataset="$1"
+
+    if [ "$1" == "-F" ]
+    then
+        flags="-duvF"
+        dataset="$2"
+    fi
 
     case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(zfs send $1@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target" 2>&1)
+            output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv $flags $zshadow_tag_target" 2>&1)
             ret=$?
             ;;
         *)
