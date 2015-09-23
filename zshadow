@@ -19,7 +19,8 @@ send_dataset()
     log "  started processing $dataset at $(date)"
 
     # calculate what the remote target's name is
-    local target_path="$zshadow_tag_target$(echo $dataset | sed 's|^[^/]*||')"
+    local target_path=$zshadow_tag_target/$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')
+    local full_target_path=$zshadow_tag_target/$dataset
 
     # blindly try to create the base snapshot, then check the
     # return code to branch on either sending the initial data, or sending
@@ -32,20 +33,14 @@ send_dataset()
         # and start fresh
         log "    initial snapshot $dataset@shadow.$zshadow_tag created"
 
-        destroy_target_snapshots "$target_path" > /dev/null 2>&1
+        create_target "$target_path" > /dev/null 2>&1
+        destroy_target_snapshots "$full_target_path" > /dev/null 2>&1
         zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
 
-        # if the local dataset is the root dataset of the pool, then the
-        # above will have destroyed the target, so re-create it.
-        if [ "$target_path" == "$zshadow_tag_target" ]
-        then
-            create_target "$target_path"
-        fi
-
-        log "    sending $dataset@shadow.$zshadow_tag to $zshadow_tag_target"
+        log "    sending $dataset@shadow.$zshadow_tag to $target_path"
 
         local send_output
-        send_output=$(send_base_to_target -F "$dataset")
+        send_output=$(send_base_to_target -F "$dataset" "$target_path")
 
         if [ $? == 0 ]
         then
@@ -75,7 +70,7 @@ send_dataset()
             else
                 log "    delta snapshot $dataset@shadow.$zshadow_tag.delta still exists, updating remote snapshots (attempt #$attempt)"
 
-                update_snapshots $dataset $target_path
+                update_snapshots $dataset $full_target_path
 
                 # on the off chance that we failed to update the snapshots again,
                 # sleep 10 seconds so that each attempt is made 10 seconds apart
@@ -96,16 +91,16 @@ send_dataset()
             continue
         fi
 
-        log "    sending $dataset@shadow.$zshadow_tag.delta to $zshadow_tag_target"
+        log "    sending $dataset@shadow.$zshadow_tag.delta to $target_path"
 
         local send_output
-        send_output=$(send_delta_to_target $dataset)
+        send_output=$(send_delta_to_target $dataset $target_path)
 
         if [ $? == 0 ]
         then
             log "    successfully sent $dataset@shadow.$zshadow_tag.delta, updating base snapshot"
 
-            update_snapshots $dataset $target_path
+            update_snapshots $dataset $full_target_path
         else
             err "    failed to send $dataset@shadow.$zshadow_tag.delta, destroying newly created delta snapshot - output: $send_output"
 
@@ -149,7 +144,7 @@ update_snapshots()
 
 destroy_target_snapshots()
 {
-    local snapshots output
+    local snapshots snapshot
 
     case "$zshadow_tag_scheme" in
         local)
@@ -157,46 +152,56 @@ destroy_target_snapshots()
         ssh)
             snapshots=$(ssh $zshadow_ssh_args zfs list -H -o name -d 1 -t snapshot "$1")
 
-            [ -z "$snapshots" ] || output=$(ssh $zshadow_ssh_args "zfs destroy $snapshots")
+            for snapshot in $snapshots
+            do
+                ssh $zshadow_ssh_args "zfs destroy $snapshot"
+            done
+            ;;
+        *)
+            ;;
+    esac
+}
+
+create_target()
+{
+    local output ret
+
+    case "$zshadow_tag_scheme" in
+        local)
+            ;;
+        ssh)
+            output=$(ssh $zshadow_ssh_args zfs create "$1" 2>&1)
+            ret=$?
             ;;
         *)
             ;;
     esac
 
     echo $output
-}
 
-create_target()
-{
-    case "$zshadow_tag_scheme" in
-        local)
-            ;;
-        ssh)
-            ssh $zshadow_ssh_args zfs create "$1" > /dev/null 2>&1
-            ;;
-        *)
-            ;;
-    esac
+    return $ret
 }
 
 send_base_to_target()
 {
-    local output ret dataset flags
+    local output ret dataset target flags
 
     flags="-duv"
     dataset="$1"
+    target="$2"
 
     if [ "$1" == "-F" ]
     then
         flags="-duvF"
         dataset="$2"
+        target="$3"
     fi
 
     case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv $flags $zshadow_tag_target" 2>&1)
+            output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv $flags $target" 2>&1)
             ret=$?
             ;;
         *)
@@ -216,7 +221,7 @@ send_delta_to_target()
         local)
             ;;
         ssh)
-            output=$(zfs send -i shadow.$zshadow_tag $1@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target" 2>&1)
+            output=$(zfs send -i shadow.$zshadow_tag $1@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $2" 2>&1)
             ret=$?
             ;;
         *)
