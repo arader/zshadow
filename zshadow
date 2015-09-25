@@ -32,7 +32,7 @@ send_dataset()
         reset_target $dataset > /dev/null 2>&1
         zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
 
-        log "    sending $dataset@shadow.$zshadow_tag to $zshadow_tag_target/$dataset"
+        log "    sending $dataset@shadow.$zshadow_tag"
 
         local send_output
         send_output=$(send_base $dataset)
@@ -86,7 +86,7 @@ send_dataset()
             continue
         fi
 
-        log "    sending $dataset@shadow.$zshadow_tag.delta to $zshadow_tag_target/$dataset"
+        log "    sending $dataset@shadow.$zshadow_tag.delta"
 
         local send_output
         send_output=$(send_delta $dataset)
@@ -114,7 +114,7 @@ update_snapshots()
 
     log "      destroying remote snapshot"
     local destroy_output
-    destroy_output=$(destroy_target_base $zshadow_tag_target/$dataset)
+    destroy_output=$(destroy_target_base $dataset)
 
     if [ $? != 0 ]
     then
@@ -122,7 +122,7 @@ update_snapshots()
     else
         log "      renaming remote snapshot"
         local rename_output
-        rename_output=$(rename_target_delta $zshadow_tag_target/$dataset)
+        rename_output=$(rename_target_delta $dataset)
 
         if [ $? == 0 ]
         then
@@ -217,11 +217,13 @@ destroy_target_base()
 {
     local output ret
 
+    local dataset="$1"
+
     case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(ssh $zshadow_ssh_args zfs destroy $1@shadow.$zshadow_tag 2>&1)
+            output=$(ssh $zshadow_ssh_args zfs destroy $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
         *)
@@ -237,11 +239,13 @@ rename_target_delta()
 {
     local output ret
 
+    local dataset="$1"
+
     case "$zshadow_tag_scheme" in
         local)
             ;;
         ssh)
-            output=$(ssh $zshadow_ssh_args zfs rename $1@shadow.$zshadow_tag.delta $1@shadow.$zshadow_tag 2>&1)
+            output=$(ssh $zshadow_ssh_args zfs rename $zshadow_tag_target/$dataset@shadow.$zshadow_tag.delta $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
         *)
@@ -333,18 +337,19 @@ parse_tag_cfg()
 
     [ ! -z "$zshadow_tag_scheme" ] || return 1
 
-    zshadow_tag_target=$(echo "$1" | sed -e "s/$zshadow_tag_scheme|\([^|]*\)|.*/\1/")
-
-    [ ! -z "$zshadow_tag_target" ] || return 1
-
     case $zshadow_tag_scheme in
         local)
             ;;
         ssh)
+            local target=$(get_cfg_option "$1" target)
             local host=$(get_cfg_option "$1" host)
             local port=$(get_cfg_option "$1" port)
             local user=$(get_cfg_option "$1" user)
             local gzip=$(get_cfg_option "$1" gzip)
+
+            [ ! -z "$target" ] || return 1
+
+            zshadow_tag_target="$target"
 
             [ ! -z "$host" ] || return 1
 
@@ -490,7 +495,6 @@ create|update)
 
     shift; while getopts :s:t:o: arg; do case ${arg} in 
       s) tag_scheme=${OPTARG};;
-      t) tag_target=${OPTARG};; 
       o)
           echo ${OPTARG} | grep -Eq '^[a-zA-Z]+=[^|]+$'
           [ $? == 0 ] || exerr "a tag option must be of the form name=value, where value does not contain the '|' character"
@@ -503,10 +507,7 @@ create|update)
     [ ! -z "$tag_scheme" ] || \
         exerr "the scheme is requried (-s <scheme>)"
 
-    [ ! -z "$tag_target" ] || \
-        exerr "the target dataset is required (-t <target>)"
-
-    tag_cfg="$tag_scheme|$tag_target|$options"
+    tag_cfg="$tag_scheme|$options"
 
     parse_tag_cfg "$tag_cfg"
 
