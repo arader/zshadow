@@ -577,13 +577,13 @@ tag)
     dataset="$1"
     tag="$2"
 
-    check_tag "$tag"
-
-    [ $? == 0 ] || exerr "tag '$tag' not found"
-
     zfs list -H -o name "$dataset" > /dev/null 2>&1
 
     [ $? == 0 ] || exerr "dataset '$dataset' not found"
+
+    check_tag "$tag"
+
+    [ $? == 0 ] || exerr "tag '$tag' not found"
 
     shift; shift;
 
@@ -613,6 +613,31 @@ tag)
     zfs set "zshadow:$tag=$tag_mode" "$dataset" > /dev/null 2>&1
 
     [ $? == 0 ] || exerr "failed to tag dataset '$dataset' with '$tag'"
+
+    ;;
+
+#
+# untag - remove a tag from a dataset
+#
+untag)
+    shift
+
+    [ $# -gt 1 ] || exerr "usage: zshadow untag <dataset> <tag>"
+
+    dataset="$1"
+    tag="$2"
+
+    zfs list -H -o name "$dataset" > /dev/null 2>&1
+
+    [ $? == 0 ] || exerr "dataset '$dataset' not found"
+
+    check_tag "$tag"
+
+    [ $? == 0 ] || exerr "tag '$tag' not found"
+
+    zfs inherit zshadow:$tag $dataset > /dev/null 2>&1
+
+    echo "removed '$tag' tag from '$dataset'"
 
     ;;
 
