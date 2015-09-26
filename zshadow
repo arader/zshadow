@@ -300,7 +300,7 @@ load_tag()
     if [ "$zshadow_tag" != "$1" ]
     then
         zshadow_tag="$1"
-        zshadow_tag_cfg=$(zfs get -H -s local -o value zshadow:$1.cfg | head -n 1)
+        zshadow_tag_cfg=$(get_cfg $1)
 
         parse_tag_cfg "$zshadow_tag_cfg"
     fi
@@ -324,16 +324,38 @@ check_tag()
     return 1
 }
 
+get_cfg()
+{
+    local tag=$1
+
+    zfs get -H -s local -o value zshadow:$tag.cfg | head -n 1
+}
+
+get_cfg_scheme()
+{
+    echo "$1" | sed -e 's/\([^|]*\)|.*/\1/'
+}
+
 get_cfg_option()
 {
     echo "$1" | grep -o "|$2=[^|]*|" | sed -e "s/|$2=\([^|]*\)|/\1/"
+}
+
+get_cfg_options()
+{
+    local cfg="$1"
+
+    echo $cfg | \
+        grep -o '|[^=]*=' | \
+        sed -e 's/^.//' -e 's/.$//' | \
+        tr '\n' ' '
 }
 
 parse_tag_cfg()
 {
     unset zshadow_ssh_args zshadow_ssh_gzip
 
-    zshadow_tag_scheme=$(echo "$1" | sed -e 's/\([^|]*\)|.*/\1/')
+    zshadow_tag_scheme=$(get_cfg_scheme $1)
 
     [ ! -z "$zshadow_tag_scheme" ] || return 1
 
@@ -684,6 +706,55 @@ list)
         done
     done
     ;;
+
+#
+# show - show a tag and all its properties
+#
+show)
+    shift
+
+    show_tags=$(parse_tags $@)
+
+    [ $? == 0 ] || exit 1
+
+    max_tag_len=3
+    max_name_len=6
+
+    for tag in $show_tags
+    do
+        tag_len=$(echo "$tag" | wc -c | tr -s ' ')
+
+        [ $tag_len -lt $max_tag_len ] || max_tag_len=$tag_len
+
+        cfg=$(get_cfg $tag)
+        options=$(get_cfg_options $cfg)
+
+        for option in $options
+        do
+            name_len=$(echo "$option" | wc -c | tr -s ' ')
+
+            [ $name_len -lt $max_name_len ] || max_name_len=$name_len
+        done
+    done
+
+    printf "%-${max_tag_len}s  %-${max_name_len}s  %s\n" 'TAG' 'OPTION' 'VALUE'
+
+    for tag in $show_tags
+    do
+        cfg=$(get_cfg $tag)
+        options=$(get_cfg_options $cfg)
+        scheme=$(get_cfg_scheme $cfg)
+
+        printf "%-${max_tag_len}s  %-${max_name_len}s  %s\n" $tag 'scheme' $scheme
+
+        for option in $options
+        do
+            value=$(get_cfg_option $cfg $option)
+            printf "%-${max_tag_len}s  %-${max_name_len}s  %s\n" $tag $option $value
+        done
+    done
+    ;;
+
 #
 # send - send datasets somewhere
 #
