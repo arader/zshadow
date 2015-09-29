@@ -16,8 +16,6 @@ send_dataset()
 {
     local dataset="$1"
 
-    log "  started processing $dataset at $(date)"
-
     # blindly try to create the base snapshot, then check the
     # return code to branch on either sending the initial data, or sending
     # an incremental stream.
@@ -27,21 +25,21 @@ send_dataset()
     then
         # the base snapshot was just created, destroy any remote data
         # and start fresh
-        log "    initial snapshot $dataset@shadow.$zshadow_tag created"
-
         reset_target $dataset > /dev/null 2>&1
         zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
-
-        log "    sending $dataset@shadow.$zshadow_tag"
 
         local send_output
         send_output=$(send_base $dataset)
 
         if [ $? == 0 ]
         then
-            log "    successfully sent snapshot '$dataset@shadow.$zshadow_tag'"
+            local time speed
+            time=$(parse_send_duration "$send_output")
+            baud=$(parse_send_speed "$send_output")
+
+            log "  sent $dataset@shadow.$zshadow_tag ($time seconds at $baud bytes/sec)"
         else
-            err "    failed to send snapshot '$dataset@shadow.$zshadow_tag', destroying newly created base snapshot - output: $send_output"
+            err "  failed to send snapshot '$dataset@shadow.$zshadow_tag', destroying newly created base snapshot - output: $send_output"
 
             # destroy the newly created base snapshot so that the next time
             # this script is run, the base snapshot will be re-created and
@@ -63,7 +61,7 @@ send_dataset()
                 # there aren't any delta snapshots on this machine, so break out of the loop
                 break
             else
-                log "    delta snapshot $dataset@shadow.$zshadow_tag.delta still exists, updating remote snapshots (attempt #$attempt)"
+                log "  delta snapshot $dataset@shadow.$zshadow_tag.delta still exists, updating remote snapshots (attempt #$attempt)"
 
                 update_snapshots $dataset 
 
@@ -86,33 +84,32 @@ send_dataset()
             continue
         fi
 
-        log "    sending $dataset@shadow.$zshadow_tag.delta"
-
         local send_output
         send_output=$(send_delta $dataset)
 
         if [ $? == 0 ]
         then
-            log "    successfully sent $dataset@shadow.$zshadow_tag.delta, updating base snapshot"
+            local time speed
+            time=$(parse_send_duration "$send_output")
+            baud=$(parse_send_speed "$send_output")
+
+            log "  sent $dataset@shadow.$zshadow_tag.delta ($time seconds at $baud bytes/sec)"
 
             update_snapshots $dataset 
         else
-            err "    failed to send $dataset@shadow.$zshadow_tag.delta, destroying newly created delta snapshot - output: $send_output"
+            err "  failed to send $dataset@shadow.$zshadow_tag.delta - output: $send_output"
 
             # since we couldn't send it, just destroy it. If this
             # script gets invoked again the delta snapshot will just be recreated.
             zfs destroy $dataset@shadow.$zshadow_tag.delta
         fi
     fi
-
-    log "  finished processing $dataset at $(date)"
 }
 
 update_snapshots()
 {
     local dataset="$1"
 
-    log "      destroying remote snapshot"
     local destroy_output
     destroy_output=$(destroy_target_base $dataset)
 
@@ -120,17 +117,14 @@ update_snapshots()
     then
         err "      failed to destroy the remote snapshot - output: $destroy_output"
     else
-        log "      renaming remote snapshot"
         local rename_output
         rename_output=$(rename_target_delta $dataset)
 
         if [ $? == 0 ]
         then
             # process local snapshots
-            log "      destroying local snapshot"
             zfs destroy $dataset@shadow.$zshadow_tag >/dev/null 2>&1
 
-            log "      renaming local snapshot"
             zfs rename $dataset@shadow.$zshadow_tag.delta $dataset@shadow.$zshadow_tag >/dev/null 2>&1
         else
             err "      failed to rename the remote snapshot - output: $rename_output"
@@ -279,7 +273,6 @@ send_tag()
 
     for dataset in $datasets
     do
-        echo "sending $dataset using tag $zshadow_tag and scheme $zshadow_tag_scheme"
         send_dataset "$dataset"
     done
 
@@ -423,6 +416,48 @@ parse_tags()
     fi
 
     echo $tags
+}
+
+parse_send_duration()
+{
+    local time
+    time=$(echo $1 | sed 's/.* \([0-9]*\) seconds.*/\1/')
+
+    echo $time | grep -qE '[0-9]+'
+
+    if [ $? == 0 ]
+    then
+        echo $time
+    else
+        echo 0
+    fi
+}
+
+parse_send_speed()
+{
+    local rate=$(echo $1 | sed 's/.*(\([0-9.]*\)[A-Z]*\/sec)/\1/')
+    local unit=$(echo $1 | sed 's/.*([0-9.]*\([A-Z]*\)\/sec)/\1/')
+    local baud
+
+    case $unit in
+        B)
+            baud=$rate
+            ;;
+        KB)
+            baud=$(echo "$rate * 1000" | bc -l)
+            ;;
+        MB)
+            baud=$(echo "$rate * 1000 * 1000" | bc -l)
+            ;;
+        GB)
+            baud=$(echo "$rate * 1000 * 1000 * 1000" | bc -l)
+            ;;
+        *)
+            baud=0
+            ;;
+    esac
+
+    echo $baud
 }
 
 lock()
