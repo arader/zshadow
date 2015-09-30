@@ -10,7 +10,121 @@ version="0.1"
 
 ec=0
 
-unset zshadow_tags zshadow_tag zshadow_tag_cfg zshadow_tag_scheme zshadow_tag_target
+unset zshadow_tags \
+    zshadow_tag \
+    zshadow_tag_cfg \
+    zshadow_tag_scheme \
+    zshadow_tag_target
+
+zshadow_help="usage: zshadow <command> <args>\n\
+    version: $version\n\
+    \tzshadow help [command]:\n\
+    \t - prints this help message or the help for any of the following sub commands\n\
+    \tzshadow create [tag name] [-s scheme] [-o option=value] ...\n\
+    \t - create a new tag configuration\n\
+    \tzshadow update [tag name] [-s scheme] [-o option=value] ...\n\
+    \t - update an existing tag configuration\n\
+    \tzshadow tag [dataset] [tag name] [-m mode]\n\
+    \t - tag a dataset\n\
+    \tzshadow send [tag name] ...\n\
+    \t - send a tag or tags\n\
+    \tzshadow list [tag name] ...\n\
+    \t - list a tag or tags and their datasets\n\
+    \tzshadow show [tag name] ...\n\
+    \t - show a tag or tag's configuration options\n\
+    \tzshadow untag [dataset] [tag name]\n\
+    \t - untag a dataset\n\
+    \tzshadow delete [tag name]\n\
+    \t - delete a tag\n"
+
+zshadow_create_help="usage: zshadow create [tag name] [-s scheme] \
+    [-o option=value] ...\n\
+    \tCreates a new tag with the given name and scheme.\n\
+    \tThe tag name is a unique id and the scheme is one of the following:\n\
+    \t ssh: sends tagged datasets to a remote host\n\
+    \n\
+    \tThe set of options supported are dependent on the scheme chosen.\n\
+    \n\
+    \tssh options:\n\
+    \t target: the remote dataset that will serve as the parent dataset\n\
+    \t host: the host name or address of the remote machine\n\
+    \t port: the port number of the sshd instance on the remote machine\n\
+    \t user: the user name to login in as on the remot emachine\n\
+    \n\
+    \tExample:\n\
+    \t zshadow create mytag -s ssh -o target=tank/shadows \\ \n\
+    \t\t -o host=backups.example.com\n\
+    \n\
+    \t The above will create tag called 'mytag'. Datasets tagged\n\
+    \t with the 'mytag' tag will be sent via ssh to the tank/shadows\n\
+    \t dataset that resides on backups.example.com\n"
+
+zshadow_update_help="usage: zshadow update [tag name] [-s scheme] \
+    [-o option=value] ...\n\
+    \tUpdates an existing tag with the given list of options.\n\
+    \tsee 'zshadow help create' for the breakdown of options."
+
+zshadow_tag_help="usage: zshadow tag [dataset] [tag name] [-m mode]\n\
+    \tTags a dataset with the specified tag. This causes the dataset\n\
+    \t(and potentially its children) to be sent when that tag is sent.\n\
+    \n\
+    \tThe tag command takes an optional 'mode' flag that can be used\n\
+    \tto specify how the tag is applied to the dataset.\n\
+    \n\
+    \tValid tag modes:\
+    \n\
+    \t send: this tag and all children datasets will be sent when\n\
+    \t\tthis tag is sent. Any children with this tag set to 'ignore'\n\
+    \t\tmode will NOT be sent with this tag.\n\
+    \t ignore: this tag and all children datasets will NOT be sent\n\
+    \t\twhen this tag is sent"
+
+zshadow_send_help="usage: zshadow send [tag name] ...\n\
+    \tSends each specified tag's set of datasets to their destination\n\
+    \n\
+    \tExamples\n\
+    \t zshadow send\n\
+    \t\tsend all tags to their configured destinations\n\
+    \t zshadow send tag1 tag2\n\
+    \t\tsend datasets tagged with tag1 and tag2"
+
+zshadow_list_help="usage: zshadow list [tag name] ...\n\
+    \tList each tag and their datasets\n\
+    \n\
+    \tExamples\n\
+    \t zshadow list\n\
+    \t\tlist all tags and their datasets\n\
+    \t zshadow list tag1 tag2\n\
+    \t\tlist datasets tagged with tag1 or tag2"
+
+zshadow_show_help="usage zshadow show [tag name] ...\n\
+    \tPrint the configuration options for each tag\n\
+    \n\
+    \tExamples\n\
+    \t zshadow show\n\
+    \t\tshow configuration options for all tags\n\
+    \t zshadow show tag1 tag2\n\
+    \t\tshow configuration options for tag1 and tag2"
+
+zshadow_untag_help="usage zshadow untag [dataset] [tag name]\n\
+    \tClear the specified tag from the given dataset.\n\
+    \n\
+    \tNote: this means that the dataset will no longer have any\n\
+    \texplicit tagging information for that tag, and will instead\n\
+    \tinherit any tagging values from its parent datasets. For example\n\
+    \tif tank/files and tank/files/important are both tagged with 'tag1'\n\
+    \tuntagging tank/files/important won't have any effect, as tag1\n\
+    \tstill applies to tank/files.\n\
+    \n\
+    \tThis can be used in interesting scenarios, to for example block\n\
+    \ta child dataset from sending using tag mode 'ignore', and then\n\
+    \tlater untagging that ignore tag so it can start being sent."
+
+zshadow_delete_help="usage zshadow delete [tag]\n\
+    \tDelete a tag\
+    \n\
+    \tWARNING: this will delete the configuration for the tag\n\
+    \t\tas well as any snapshots created with that tag."
 
 send_dataset()
 {
@@ -494,22 +608,6 @@ exerr()
     exit 1
 }
 
-usage()
-{
-    echo "usage: zshadow [-p port] [-h] dest_host local_dataset1:remote_dataset1 [local_dataset2:remote_dataset2] ..."
-    echo " -p port: the ssh port to connect to on the remote host"
-    echo " -h: print this help"
-    echo " -v: print the version info"
-    echo " dest_host: the destination host to receive the datasets from"
-    echo " local_dataset1: the local dataset to replicate"
-    echo " remote_dataset1: the place to replicate local_dataset1 to"
-}
-
-version()
-{
-    echo "zshadow version $version"
-}
-
 ########## END FUNCTION DECLARATIONS ##########
 
 case "$1" in
@@ -523,8 +621,8 @@ create|update)
 
     if [ $# -lt 3 ]
     then
-        usage
-        exit 1
+        [ "$action" == "create" ] && exerr $zshadow_create_help
+        exerr $zshadow_update_help
     fi
 
     echo "$1" | grep -q '^[a-zA-Z0-9][a-zA-Z0-9_\-]*$' || \
@@ -554,7 +652,10 @@ create|update)
 
           options=$(echo "$options${OPTARG}|")
           ;;
-      ?) usage;; 
+      *)
+        [ "$action" == "create" ] && exerr $zshadow_create_help
+        exerr $zshadow_update_help
+        ;;
     esac; done; shift $(( ${OPTIND} - 1 ))
 
     [ ! -z "$tag_scheme" ] || \
@@ -583,11 +684,7 @@ create|update)
 delete)
     shift
 
-    if [ $# != 1 ]
-    then
-        usage
-        exit 1
-    fi
+    [ $# == 1 ] || exerr $zshadow_delete_help
 
     tag="$1"
 
@@ -625,7 +722,7 @@ delete)
 tag)
     shift
 
-    [ $# -gt 1 ] || exerr "usage: zshadow tag <dataset> <tag>"
+    [ $# -gt 1 ] || exerr $zshadow_tag_help
 
     dataset="$1"
     tag="$2"
@@ -652,13 +749,12 @@ tag)
                   tag_mode='ignore'
                   ;;
               *)
-                  usage
-                  exit 1;
+                  exerr $zshadow_tag_help
+                  ;;
           esac
             ;;
       *)
-          usage
-          exit 1;
+          exerr $zshadow_tag_help
           ;;
     esac; done; shift $(( ${OPTIND} - 1 ))
 
@@ -675,7 +771,7 @@ tag)
 untag)
     shift
 
-    [ $# -gt 1 ] || exerr "usage: zshadow untag <dataset> <tag>"
+    [ $# -gt 1 ] || exerr $zshadow_untag_help
 
     dataset="$1"
     tag="$2"
@@ -807,10 +903,49 @@ send)
     ;;
 
 #
+# help - print help info
+#
+help)
+    shift
+
+    [ $# -lt 2 ] || exerr $zshadow_help
+
+    case $1 in
+        create)
+            exerr $zshadow_create_help
+            ;;
+        update)
+            exerr $zshadow_update_help
+            ;;
+        tag)
+            exerr $zshadow_tag_help
+            ;;
+        send)
+            exerr $zshadow_send_help
+            ;;
+        list)
+            exerr $zshadow_list_help
+            ;;
+        show)
+            exerr $zshadow_show_help
+            ;;
+        untag)
+            exerr $zshadow_untag_help
+            ;;
+        delete)
+            exerr $zshadow_delete_help
+            ;;
+        *)
+            exerr $zshadow_help
+            ;;
+    esac
+    ;;
+
+#
 # error - unrecognized command
 #
 *)
-    usage
+    exerr $zshadow_help
     ;;
 esac
 
