@@ -29,7 +29,7 @@ send_dataset()
         zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
 
         local send_output
-        send_output=$(send_base $dataset)
+        send_output=$(send_snapshot base $dataset)
 
         if [ $? == 0 ]
         then
@@ -84,7 +84,7 @@ send_dataset()
         fi
 
         local send_output
-        send_output=$(send_delta $dataset)
+        send_output=$(send_snapshot delta $dataset)
 
         if [ $? == 0 ]
         then
@@ -136,8 +136,6 @@ reset_target()
     local dataset="$1"
 
     case "$zshadow_tag_scheme" in
-        local)
-            ;;
         ssh)
             local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
             ssh $zshadow_ssh_args zfs create "$zshadow_tag_target/$pool" 
@@ -150,6 +148,8 @@ reset_target()
             done
             ;;
         *)
+            output="send scheme not supported"
+            ret=1
             ;;
     esac
 
@@ -158,19 +158,31 @@ reset_target()
     return $ret
 }
 
-send_base()
+send_snapshot()
 {
-    local output ret dataset
+    local mode dataset output ret
 
-    dataset="$1"
+    mode="$1"
+    dataset="$2"
 
     case "$zshadow_tag_scheme" in
-        local)
-            ;;
         ssh)
             local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
-            output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duvF $zshadow_tag_target/$pool" 2>&1)
-            ret=$?
+
+            case $mode in
+                base)
+                    output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duvF $zshadow_tag_target/$pool" 2>&1)
+                    ret=$?
+                    ;;
+                delta) 
+                    output=$(zfs send -i shadow.$zshadow_tag $dataset@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target/$pool" 2>&1)
+                    ret=$?
+                    ;;
+                *)
+                    output="unrecognized send mode"
+                    ret=1
+                    ;;
+            esac
 
             if [ $ret == 0 ]
             then
@@ -181,37 +193,8 @@ send_base()
             fi
             ;;
         *)
-            ;;
-    esac
-
-    echo $output
-
-    return $ret
-}
-
-send_delta()
-{
-    local output ret dataset
-
-    dataset="$1"
-
-    case "$zshadow_tag_scheme" in
-        local)
-            ;;
-        ssh)
-            local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
-            output=$(zfs send -i shadow.$zshadow_tag $dataset@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target/$pool" 2>&1)
-            ret=$?
-
-            if [ $ret == 0 ]
-            then
-                local time=$(parse_send_duration "$output")
-                local baud=$(parse_send_speed "$output")
-
-                output="$time|$baud"
-            fi
-            ;;
-        *)
+            output="send scheme not supported"
+            ret=1
             ;;
     esac
 
@@ -227,13 +210,13 @@ destroy_target_base()
     local dataset="$1"
 
     case "$zshadow_tag_scheme" in
-        local)
-            ;;
         ssh)
             output=$(ssh $zshadow_ssh_args zfs destroy $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
         *)
+            output="send scheme not supported"
+            ret=1
             ;;
     esac
 
@@ -249,13 +232,13 @@ rename_target_delta()
     local dataset="$1"
 
     case "$zshadow_tag_scheme" in
-        local)
-            ;;
         ssh)
             output=$(ssh $zshadow_ssh_args zfs rename $zshadow_tag_target/$dataset@shadow.$zshadow_tag.delta $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
         *)
+            output="send scheme not supported"
+            ret=1
             ;;
     esac
 
