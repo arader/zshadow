@@ -33,9 +33,8 @@ send_dataset()
 
         if [ $? == 0 ]
         then
-            local time speed
-            time=$(parse_send_duration "$send_output")
-            baud=$(parse_send_speed "$send_output")
+            local time=$(echo "$send_output" | sed 's/|.*$//')
+            local baud=$(echo "$send_output" | sed 's/^.*|//')
 
             log "  sent $dataset@shadow.$zshadow_tag ($time seconds at $baud bytes/sec)"
         else
@@ -89,10 +88,8 @@ send_dataset()
 
         if [ $? == 0 ]
         then
-            local time speed
-            time=$(parse_send_duration "$send_output")
-            baud=$(parse_send_speed "$send_output")
-
+            local time=$(echo "$send_output" | sed 's/|.*$//')
+            local baud=$(echo "$send_output" | sed 's/^.*|//')
             log "  sent $dataset@shadow.$zshadow_tag.delta ($time seconds at $baud bytes/sec)"
 
             update_snapshots $dataset 
@@ -174,6 +171,14 @@ send_base()
             local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
             output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duvF $zshadow_tag_target/$pool" 2>&1)
             ret=$?
+
+            if [ $ret == 0 ]
+            then
+                local time=$(parse_send_duration "$output")
+                local baud=$(parse_send_speed "$output")
+
+                output="$time|$baud"
+            fi
             ;;
         *)
             ;;
@@ -197,6 +202,14 @@ send_delta()
             local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
             output=$(zfs send -i shadow.$zshadow_tag $dataset@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target/$pool" 2>&1)
             ret=$?
+
+            if [ $ret == 0 ]
+            then
+                local time=$(parse_send_duration "$output")
+                local baud=$(parse_send_speed "$output")
+
+                output="$time|$baud"
+            fi
             ;;
         *)
             ;;
