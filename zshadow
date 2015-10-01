@@ -142,11 +142,14 @@ send_dataset()
         reset_target $dataset > /dev/null 2>&1
         zfs destroy $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1 
 
+        local now=$(date +%s)
         local send_output
         send_output=$(send_snapshot base $dataset)
 
         if [ $? == 0 ]
         then
+            zfs set zshadow:$zshadow_tag.sent=$now $dataset@shadow.$zshadow_tag > /dev/null 2>&1
+
             local time=$(echo "$send_output" | sed 's/|.*$//')
             local baud=$(echo "$send_output" | sed 's/^.*|//')
 
@@ -197,11 +200,14 @@ send_dataset()
             continue
         fi
 
+        local now=$(date +%s)
         local send_output
         send_output=$(send_snapshot delta $dataset)
 
         if [ $? == 0 ]
         then
+            zfs set zshadow:$zshadow_tag.sent=$now $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1
+
             local time=$(echo "$send_output" | sed 's/|.*$//')
             local baud=$(echo "$send_output" | sed 's/^.*|//')
             log "  sent $dataset@shadow.$zshadow_tag.delta ($time seconds at $baud bytes/sec)"
@@ -819,17 +825,26 @@ list)
         done
     done
 
-    printf "%-${max_tag_len}s  %-${max_ds_len}s\n" 'TAG' 'DATASET'
+    printf "%-${max_tag_len}s  %-${max_ds_len}s  %s\n" 'TAG' 'DATASET' 'LAST SENT'
 
     for tag in $list_tags
     do
         datasets=$(get_datasets_for_tag $tag)
 
-        [ ! -z "$datasets" ] || printf "%-${max_tag_len}s  -\n" $tag
+        [ ! -z "$datasets" ] || printf "%-${max_tag_len}s  %-${max_ds_len}s  %s\n" $tag '-' '-'
 
         for dataset in $datasets
         do
-            printf "%-${max_tag_len}s  %-${max_ds_len}s\n" $tag $dataset
+            last_sent=$(zfs get -H -o value zshadow:$tag.sent $dataset@shadow.$tag 2>&1)
+
+            if [ $? == 0 ]
+            then
+                last_sent_date=$(date -r $last_sent)
+            else
+                last_sent_date='-'
+            fi
+
+            printf "%-${max_tag_len}s  %-${max_ds_len}s  %s\n" "$tag" "$dataset" "$last_sent_date"
         done
     done
     ;;
