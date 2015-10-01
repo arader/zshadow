@@ -255,16 +255,32 @@ reset_target()
 
     local dataset="$1"
 
-    case "$zshadow_tag_scheme" in
-        ssh)
-            local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
-            ssh $zshadow_ssh_args zfs create "$zshadow_tag_target/$pool" 
+    local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
 
-            snapshots=$(ssh $zshadow_ssh_args zfs list -H -o name -d 1 -t snapshot "$zshadow_tag_target/$dataset")
+    case "$zshadow_tag_scheme" in
+        ssh|local)
+            if [ "$zshadow_tag_scheme" == "ssh" ]
+            then
+                ssh $zshadow_ssh_args zfs create "$zshadow_tag_target/$pool" 
+            else
+                zfs create "$zshadow_tag_target/$pool" 
+            fi
+
+            if [ "$zshadow_tag_scheme" == "ssh" ]
+            then
+                snapshots=$(ssh $zshadow_ssh_args zfs list -H -o name -d 1 -t snapshot "$zshadow_tag_target/$dataset")
+            else
+                snapshots=$(zfs list -H -o name -d 1 -t snapshot "$zshadow_tag_target/$dataset")
+            fi
 
             for snapshot in $snapshots
             do
-                ssh $zshadow_ssh_args "zfs destroy $snapshot"
+                if [ "$zshadow_tag_scheme" == "ssh" ]
+                then
+                    ssh $zshadow_ssh_args "zfs destroy $snapshot"
+                else
+                    zfs destroy $snapshot
+                fi
             done
             ;;
         *)
@@ -285,18 +301,30 @@ send_snapshot()
     mode="$1"
     dataset="$2"
 
-    case "$zshadow_tag_scheme" in
-        ssh)
-            local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
+    local pool="$(echo $dataset | sed 's|\([^/]*\)/.*|\1|')"
 
+    case "$zshadow_tag_scheme" in
+        ssh|local)
             case $mode in
                 base)
-                    output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duvF $zshadow_tag_target/$pool" 2>&1)
-                    ret=$?
+                    if [ "$zshadow_tag_scheme" == "ssh" ]
+                    then
+                        output=$(zfs send $dataset@shadow.$zshadow_tag | ssh $zshadow_ssh_args "zfs recv -duvF $zshadow_tag_target/$pool" 2>&1)
+                        ret=$?
+                    else
+                        output=$(zfs send $dataset@shadow.$zshadow_tag | zfs recv -duvF $zshadow_tag_target/$pool 2>&1)
+                        ret=$?
+                    fi
                     ;;
                 delta) 
-                    output=$(zfs send -i shadow.$zshadow_tag $dataset@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target/$pool" 2>&1)
-                    ret=$?
+                    if [ "$zshadow_tag_scheme" == "ssh" ]
+                    then
+                        output=$(zfs send -i shadow.$zshadow_tag $dataset@shadow.$zshadow_tag.delta | ssh $zshadow_ssh_args "zfs recv -duv $zshadow_tag_target/$pool" 2>&1)
+                        ret=$?
+                    else
+                        output=$(zfs send -i shadow.$zshadow_tag $dataset@shadow.$zshadow_tag.delta | zfs recv -duv $zshadow_tag_target/$pool 2>&1)
+                        ret=$?
+                    fi
                     ;;
                 *)
                     output="unrecognized send mode"
@@ -334,6 +362,10 @@ destroy_target_base()
             output=$(ssh $zshadow_ssh_args zfs destroy $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
+        local)
+            output=$(zfs destroy $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
+            ret=$?
+            ;;
         *)
             output="send scheme not supported"
             ret=1
@@ -354,6 +386,10 @@ rename_target_delta()
     case "$zshadow_tag_scheme" in
         ssh)
             output=$(ssh $zshadow_ssh_args zfs rename $zshadow_tag_target/$dataset@shadow.$zshadow_tag.delta $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
+            ret=$?
+            ;;
+        local)
+            output=$(zfs rename $zshadow_tag_target/$dataset@shadow.$zshadow_tag.delta $zshadow_tag_target/$dataset@shadow.$zshadow_tag 2>&1)
             ret=$?
             ;;
         *)
@@ -470,6 +506,11 @@ parse_tag_cfg()
 
     case $zshadow_tag_scheme in
         local)
+            local target=$(get_cfg_option "$1" target)
+
+            [ ! -z "$target" ] || return 1
+
+            zshadow_tag_target="$target"
             ;;
         ssh)
             local target=$(get_cfg_option "$1" target)
