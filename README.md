@@ -20,18 +20,18 @@ The **zshadow** script is a single shell script that is designed to have
 zero dependencies on a FreeBSD system. No installation is necessary, just
 copy the script down and you can start using it.
 
-**zshadow** is meant for people with a simple goal: anyone that has a collection
-of ZFS datasets that wants to replicate them. The script is designed to support
-this goal in a number of flexible ways.
+**zshadow** is meant for people with a simple goal: anyone that has a
+collection of ZFS datasets that wants to replicate them. The script is
+designed to support this goal in a number of flexible ways.
 
-For example, say you have a pool named 'tank', and you want every dataset
+For example, say you have a pool named 'tank' and you want every dataset
 in that pool except one to go to a remote machine for safe keeping, **zshadow**
 supports that.
 
 ## Concepts
-The concepts used by **zshadow** are meant to be easily understood. A complicated
-backup strategy is never a good idea. To that end, **zshadow** uses a concept
-of 'tagging' datasets for sending.
+The concepts used by **zshadow** are meant to be easily understood. A
+complicated backup strategy is never a good idea. To that end, **zshadow**
+uses a concept of 'tagging' datasets for sending.
 
 ### Tags
 A **tag** is a named set of configuration options used for sending datasets. For
@@ -46,7 +46,7 @@ When you invoke the **zshadow** script with the 'send' command, you tell it
 which tags you want to send.
 
 ### Sending
-When you use the **zshadow**'s send command, you give it a list of tags to send.
+When you use **zshadow**'s send command you give it a list of tags to send.
 **zshadow** then looks for every dataset marked with those tags, updates the
 local snapshots, and then sends them based on that tag's configuration.
 
@@ -55,7 +55,7 @@ tag might be configured to use **ssh** to send snapshots, where as another
 might store snapshots in a local pool. This is meant to be extensible, so
 later versions of **zshadow** could support more exotic transfer mechanisms.
 
-# Examples
+# Using zshadow
 
 ## Setup
 Create a remote or local dataset that will serve as the root of your backups:
@@ -76,21 +76,20 @@ Now that you have a place to store your snapshots, you need to create a tag
 that contains the configuration options necessary to send your snapshots to it.
 
 ### Local replication
-The simplest form of replication is to replicate datasets to the local machine.
-The only option needed is the name of the local dataset that the replications
-should be stored in:
+The simplest form of replication is to the local machine. The only option needed
+is the name of the local dataset that the replications should be stored in:
 
     root@host:/ # zshadow create local-mirror -s local -o target=vault/shadows
 
 The above created a tag named **local-mirror** using the **local** scheme. The
-only option provided is the target dataset for sends. In this example sending the
-local dataset 'tank/myfiles' will result in teh sanpshot being replicated to
+only option provided is the target dataset for sends. In this example sending
+the local dataset 'tank/myfiles' will result in the snapshot being replicated to
 'vault/shadows/tank/myfiles' on the local machine.
 
 ### Remote replication
 For replication snapshots to a remote machine, **ssh** is used as the mechanism
 for gettings bits from your local machine to the remote host. To that end, a tag
-using **ssh** is going to a few more options than datasets that are being
+using **ssh** is going to require a few more options than datasets that are
 replicated locally:
 
     root@host:/ # zshadow create UK-mirror -s ssh -o target=vault/shadows \
@@ -117,7 +116,7 @@ The above tagged the 'tank/files' dataset with the 'UK-mirror' tag. Now
 if the 'UK-mirror' tag were to be sent using **zshadow send** the 'tank/files'
 dataset (and all its children!)  would have a snapshot taken and replicated.
 
-A dataset can have any number of tags applied to it, which each tag having
+A dataset can have any number of tags applied to it, with each tag having
 a "**mode**" to go with it.
 
 ### Tag modes
@@ -128,8 +127,8 @@ This value is used to tell **zshadow** how to treat this dataset when that
 particular tag is being sent.
 
 #### Send mode
-The default tag mode is '**send**'. This causes the dataset to be have a
-snapshot taken to to be replicated whenever that tag is being sent by
+The default tag mode is '**send**'. This causes the dataset to have a
+snapshot taken and to be replicated whenever that tag is being sent by
 **zshadow**.
 
 The send mode of a tag is inherited, meaning all children datasets of a
@@ -184,3 +183,8 @@ are tagged, and when each dataset was last sent:
 In the above output you can see the tags, their datasets, and the times
 for each replication. The last two have never been sent, due to the '-'
 in the LAST SENT column
+
+# Help
+Use the **zshadow help** command to get a breakdown of what commands
+are available. Use **zshadow help <command>** to get detailed help,
+including the list of options, for a specific command.
