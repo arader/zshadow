@@ -184,7 +184,7 @@ In the above output you can see the tags, their datasets, and the times
 for each replication. The last two have never been sent, due to the '-'
 in the LAST SENT column
 
-# Help
+## Help
 Use the **zshadow help** command to get a breakdown of what commands
 are available. Use **zshadow help <command>** to get detailed help,
 including the list of options, for a specific command.
