@@ -34,6 +34,8 @@ zshadow_help="usage: zshadow <command> <args>\n\
     \t - show a tag or tag's configuration options\n\
     \tzshadow untag [dataset] [tag name]\n\
     \t - untag a dataset\n\
+    \tzshadow reset [dataset] [tag name]\n\
+    \t - reset a dataset back to its unsent state\n\
     \tzshadow delete [tag name]\n\
     \t - delete a tag\n"
 
@@ -119,6 +121,14 @@ zshadow_untag_help="usage zshadow untag [dataset] [tag name]\n\
     \tThis can be used in interesting scenarios, to for example block\n\
     \ta child dataset from sending using tag mode 'ignore', and then\n\
     \tlater untagging that ignore tag so it can start being sent."
+
+zshadow_reset_help="usage zshadow reset [dataset] [tag]\n\
+    \tReset the specified tag for the given dataset.\n\
+    \n\
+    \tWARNING: This will destroy the snapshot used for sending the\n\
+    \tspecified dataset, so on the next send of the specified tag the\n\
+    \tdataset will have it's target wiped, and the entire dataset will be\n\
+    \nresent. Only use this as a last resort!"
 
 zshadow_delete_help="usage zshadow delete [tag]\n\
     \tDelete a tag\
@@ -838,6 +848,22 @@ untag)
     ;;
 
 #
+# reset - reset a dataset's state for a given tag
+#
+reset)
+    shift
+
+    [ $# == 2 ] || exerr $zshadow_reset_help
+
+    dataset="$1"
+    tag="$2"
+
+    zfs destroy "$dataset@shadow.$tag.delta" > /dev/null 2>&1
+    zfs destroy "$dataset@shadow.$tag" > /dev/null 2>&1
+
+    ;;
+
+#
 # list - list all tags
 #
 list)
@@ -987,6 +1013,9 @@ help)
             ;;
         untag)
             exerr $zshadow_untag_help
+            ;;
+        reset)
+            exerr $zshadow_reset_help
             ;;
         delete)
             exerr $zshadow_delete_help
