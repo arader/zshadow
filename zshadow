@@ -690,22 +690,21 @@ create|update)
 
     if [ "$action" == "create" ]
     then
-        check_tag "$tag"
-
-        [ $? != 0 ] || exerr "tag '$tag' already exists, did you mean 'update'?"
+        check_tag "$tag" && \
+            exerr "tag '$tag' already exists, did you mean 'update'?"
     else
-        check_tag "$tag"
+        check_tag "$tag" || \
+            exerr "tag '$tag' does not exist, use 'create' to create it"
 
-        [ $? == 0 ] || exerr "tag '$tag' does not exist, use 'create' to create it"
-
-        lock "$tag" || exerr "tag '$tag' currently locked for sending"
+        lock "$tag" || \
+            exerr "tag '$tag' currently locked for sending"
     fi
 
     shift; while getopts :s:t:o: arg; do case ${arg} in 
       s) tag_scheme=${OPTARG};;
       o)
-          echo ${OPTARG} | grep -Eq '^[a-zA-Z]+=[^|]+$'
-          [ $? == 0 ] || exerr "a tag option must be of the form name=value, where value does not contain the '|' character"
+          echo ${OPTARG} | grep -Eq '^[a-zA-Z]+=[^|]+$' || \
+              exerr "a tag option must be of the form name=value, where value does not contain the '|' character"
 
           options=$(echo "$options${OPTARG}|")
           ;;
@@ -720,18 +719,23 @@ create|update)
 
     tag_cfg="$tag_scheme|$options"
 
-    parse_tag_cfg "$tag_cfg"
-
-    [ $? == 0 ] || exerr "invalid options list for $tag_scheme"
+    parse_tag_cfg "$tag_cfg" || \
+        exerr "invalid options list for $tag_scheme"
 
     # when creating a new tag, add the tag properties to every pool
     # so it's a global property regardless of what pools are connected
-    all_pools=$(zpool list -H -o name)
+    all_pools=$(zpool list -H -o name) || \
+        exerr "failed to find any ZFS pools"
 
-    echo "creating $tag"
-    zfs set zshadow:$tag.cfg=$tag_cfg $all_pools > /dev/null 2>&1
+    output=$(zfs set zshadow:$tag.cfg=$tag_cfg $all_pools 2>&1) || \
+        exerr "failed to create tag $tag, $output"
 
-    [ $? == 0 ] || exerr "failed to create tag $tag"
+    if [ "$action" == "create" ]
+    then
+        echo "created tag '$tag'"
+    else
+        echo "updated tag '$tag'"
+    fi
 
     ;;
 
@@ -745,30 +749,32 @@ delete)
 
     tag="$1"
 
-    check_tag "$tag" || exerr "tag '$tag' does not exist"
+    check_tag "$tag" || \
+        exerr "tag '$tag' does not exist"
 
-    lock "$tag" || exerr "tag '$tag' currently locked for sending"
+    lock "$tag" || \
+        exerr "tag '$tag' currently locked for sending"
 
-    all_pools=$(zpool list -H -o name)
+    all_pools=$(zpool list -H -o name) || \
+        exerr "failed to find any ZFS pools"
 
-    zfs inherit zshadow:$tag.cfg $all_pools > /dev/null 2>&1
-
-    [ $? == 0 ] || exerr "failed to remove tag configuration for $tag"
+    output=$(zfs inherit zshadow:$tag.cfg $all_pools 2>&1) || \
+        exerr "failed to remove tag configuration for $tag, $output"
 
     all_sets=$(zfs get -H -s local -o name zshadow:$tag)
 
     if [ ! -z "$all_sets" ]
     then
-        zfs inherit zshadow:$tag $all_sets > /dev/null 2>&1
-
-        [ $? == 0 ] || exerr "failed to remove tag $tag"
+        output=$(zfs inherit zshadow:$tag $all_sets 2>&1) || \
+            exerr "failed to remove tag $tag, $output"
     fi
 
     all_snaps=$(zfs list -H -t snapshot -o name | grep "@shadow.$tag$")
 
     for snap in $all_snaps
     do
-        zfs destroy $snap > /dev/null 2>&1
+        output=$(zfs destroy $snap 2>&1) || \
+            echo "failed to destroy snapshot $snap, continuing on to next snapshot"
     done
 
     ;;
@@ -784,13 +790,11 @@ tag)
     dataset="$1"
     tag="$2"
 
-    zfs list -H -o name "$dataset" > /dev/null 2>&1
+    zfs list -H -o name "$dataset" > /dev/null 2>&1 || \
+        exerr "dataset '$dataset' not found"
 
-    [ $? == 0 ] || exerr "dataset '$dataset' not found"
-
-    check_tag "$tag"
-
-    [ $? == 0 ] || exerr "tag '$tag' not found"
+    check_tag "$tag" || \
+        exerr "tag '$tag' not found"
 
     shift; shift;
 
@@ -815,10 +819,10 @@ tag)
           ;;
     esac; done; shift $(( ${OPTIND} - 1 ))
 
+    output=$(zfs set "zshadow:$tag=$tag_mode" "$dataset" 2>&1) || \
+        exerr "failed to tag dataset '$dataset' with '$tag', $output"
 
-    zfs set "zshadow:$tag=$tag_mode" "$dataset" > /dev/null 2>&1
-
-    [ $? == 0 ] || exerr "failed to tag dataset '$dataset' with '$tag'"
+    echo "added '$tag' tag to '$dataset"
 
     ;;
 
@@ -833,15 +837,14 @@ untag)
     dataset="$1"
     tag="$2"
 
-    zfs list -H -o name "$dataset" > /dev/null 2>&1
+    zfs list -H -o name "$dataset" > /dev/null 2>&1 || \
+        exerr "dataset '$dataset' not found"
 
-    [ $? == 0 ] || exerr "dataset '$dataset' not found"
+    check_tag "$tag" || \
+        exerr "tag '$tag' not found"
 
-    check_tag "$tag"
-
-    [ $? == 0 ] || exerr "tag '$tag' not found"
-
-    zfs inherit zshadow:$tag $dataset > /dev/null 2>&1
+    output=$(zfs inherit zshadow:$tag $dataset > /dev/null 2>&1) || \
+        exerr "failed to remove '$tag' from '$dataset'"
 
     echo "removed '$tag' tag from '$dataset'"
 
@@ -858,11 +861,17 @@ reset)
     dataset="$1"
     tag="$2"
 
-    zfs list -H -o name "$dataset" > /dev/null 2>&1 || exerr "dataset '$dataset' not found"
-    check_tag "$tag" || exerr "tag '$tag' not found"
+    zfs list -H -o name "$dataset" > /dev/null 2>&1 || \
+        exerr "dataset '$dataset' not found"
+
+    check_tag "$tag" || \
+        exerr "tag '$tag' not found"
 
     zfs destroy "$dataset@shadow.$tag.delta" > /dev/null 2>&1
-    output=$(zfs destroy "$dataset@shadow.$tag" 2>&1) || exerr "failed to reset '$dataset', $output"
+    output=$(zfs destroy "$dataset@shadow.$tag" 2>&1) || \
+        exerr "failed to reset '$dataset', $output"
+
+    echo "reset '$tag' tag on '$dataset'"
 
     ;;
 
@@ -872,9 +881,7 @@ reset)
 list)
     shift
 
-    list_tags=$(parse_tags $@)
-
-    [ $? == 0 ] || exit 1
+    list_tags=$(parse_tags $@) || exit 1
 
     max_tag_len=0
     max_ds_len=0
@@ -919,9 +926,7 @@ list)
 show)
     shift
 
-    show_tags=$(parse_tags $@)
-
-    [ $? == 0 ] || exit 1
+    show_tags=$(parse_tags $@) || exit 1
 
     max_tag_len=3
     max_name_len=6
@@ -967,9 +972,7 @@ show)
 send)
     shift
 
-    send_tags=$(parse_tags $@)
-
-    [ $? == 0 ] || exit 1
+    send_tags=$(parse_tags $@) || exit 1
 
     log "started processing datasets at $(date)"
 
