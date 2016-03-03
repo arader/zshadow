@@ -858,8 +858,11 @@ reset)
     dataset="$1"
     tag="$2"
 
+    zfs list -H -o name "$dataset" > /dev/null 2>&1 || exerr "dataset '$dataset' not found"
+    check_tag "$tag" || exerr "tag '$tag' not found"
+
     zfs destroy "$dataset@shadow.$tag.delta" > /dev/null 2>&1
-    zfs destroy "$dataset@shadow.$tag" > /dev/null 2>&1
+    output=$(zfs destroy "$dataset@shadow.$tag" 2>&1) || exerr "failed to reset '$dataset', $output"
 
     ;;
 
