@@ -159,7 +159,7 @@ send_dataset()
 
         if [ $? == 0 ]
         then
-            zfs set zshadow:$zshadow_tag.sent=$now $dataset@shadow.$zshadow_tag > /dev/null 2>&1
+            zfs set zshadow:sent=$now $dataset@shadow.$zshadow_tag > /dev/null 2>&1
 
             local time=$(echo "$send_output" | sed 's/|.*$//')
             local baud=$(echo "$send_output" | sed 's/^.*|//')
@@ -217,7 +217,7 @@ send_dataset()
 
         if [ $? == 0 ]
         then
-            zfs set zshadow:$zshadow_tag.sent=$now $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1
+            zfs set zshadow:sent=$now $dataset@shadow.$zshadow_tag.delta > /dev/null 2>&1
 
             local time=$(echo "$send_output" | sed 's/|.*$//')
             local baud=$(echo "$send_output" | sed 's/^.*|//')
@@ -921,7 +921,7 @@ list)
 
         for dataset in $datasets
         do
-            last_sent=$(zfs get -H -o value zshadow:$tag.sent $dataset@shadow.$tag 2>&1)
+            last_sent=$(zfs get -H -o value zshadow:sent $dataset@shadow.$tag 2>&1)
             last_sent_date=$(date -r $last_sent 2>&1) || last_sent_date='-'
 
             printf "%-${max_tag_len}s  %-${max_ds_len}s  %s\n" "$tag" "$dataset" "$last_sent_date"
